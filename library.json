@@ -1,0 +1,9 @@
+{
+    "id": "{8D4829A8-A027-4708-8B04-C9CE8FA27B74}",
+    "author": "Martin Wilkens",
+    "name": "BMW ConnectedDrive",
+    "description": "BMW ConnectedDrive integration for IP-Symcon. OAuth2+PKCE authentication, vehicle data and remote services.",
+    "version": "1.0",
+    "date": 1780527746,
+    "url": "https://github.com/mwilkens780/IPSymcon-BMW-ConnectedDrive"
+}

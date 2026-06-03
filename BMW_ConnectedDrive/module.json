@@ -1,0 +1,12 @@
+{
+    "id": "{B73097DA-A61C-4BE0-894C-D979BDD52C58}",
+    "name": "BMW ConnectedDrive",
+    "type": 3,
+    "vendor": "BMW",
+    "aliases": [],
+    "dependencies": [],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "BMW"
+}

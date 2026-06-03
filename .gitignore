@@ -1,0 +1,13 @@
+# OAuth token store – enthält echte Tokens, niemals einchecken!
+BMW_ConnectedDrive/test_store.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
