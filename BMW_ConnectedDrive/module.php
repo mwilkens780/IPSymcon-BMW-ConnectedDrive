@@ -5,27 +5,25 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/api.php';
 
-// ─── IPS module status codes ──────────────────────────────────────────────────
-// IS_ACTIVE    = 102
-// IS_INACTIVE  = 104
-// IS_NOTCREATED = 201
-
 class BMWConnectedDrive extends IPSModule
 {
-    // ─── Module lifecycle ─────────────────────────────────────────────────────
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     public function Create(): void
     {
         parent::Create();
 
-        $this->RegisterPropertyString('username',        '');
-        $this->RegisterPropertyString('password',        '');
-        $this->RegisterPropertyString('region',          'ROW');
-        $this->RegisterPropertyString('hcaptcha_token',  '');
+        $this->RegisterPropertyString('client_id',       '');
         $this->RegisterPropertyInteger('update_interval', 300);
 
-        // OAuth store: access_token, refresh_token, gcid, expires_at
+        // OAuth store: access_token, refresh_token, expires_at
         $this->RegisterAttributeString('oauth_store', '');
+        // Container ID for telematic data
+        $this->RegisterAttributeString('container_id', '');
+        // Device Code Flow pending state
+        $this->RegisterAttributeString('pending_auth', '');
+        // Primary VIN (auto-detected)
+        $this->RegisterAttributeString('vin', '');
 
         $this->RegisterTimer('UpdateTimer', 0, 'BMWCD_FetchVehicleData($_IPS[\'TARGET\']);');
     }
@@ -39,32 +37,171 @@ class BMWConnectedDrive extends IPSModule
     {
         parent::ApplyChanges();
 
-        if (trim($this->ReadPropertyString('username')) === ''
-            || trim($this->ReadPropertyString('password')) === '') {
-            $this->SetStatus(201); // not configured
+        $clientId = trim($this->ReadPropertyString('client_id'));
+        if ($clientId === '') {
+            $this->SetStatus(201);
+            $this->SetTimerInterval('UpdateTimer', 0);
+            return;
+        }
+
+        $store = $this->readStore();
+        if (empty($store)) {
+            $this->SetStatus(202); // auth required
             $this->SetTimerInterval('UpdateTimer', 0);
             return;
         }
 
         $interval = $this->ReadPropertyInteger('update_interval');
         $this->SetTimerInterval('UpdateTimer', $interval > 0 ? $interval * 1000 : 0);
-        $this->SetStatus(102); // active
+        $this->SetStatus(102);
     }
 
-    // ─── Public methods (callable as BMW_xxx($id) from IPS scripts) ───────────
+    // ─── Dynamic configuration form ───────────────────────────────────────────
+
+    public function GetConfigurationForm(): string
+    {
+        $form = json_decode(file_get_contents(__DIR__ . '/form.json'), true);
+
+        $pendingAuth = $this->readPendingAuth();
+        $store       = $this->readStore();
+
+        // Insert auth status element below the client_id field
+        $statusElement = null;
+
+        if (!empty($pendingAuth)) {
+            $expiresIn = max(0, (int) $pendingAuth['expires_at'] - time());
+            $statusElement = [
+                'type'    => 'Label',
+                'caption' => "⏳ Warte auf Browser-Anmeldung (noch {$expiresIn}s gültig)\n"
+                    . "1. Öffne: " . $pendingAuth['verification_uri'] . "\n"
+                    . "2. Gib diesen Code ein: " . $pendingAuth['user_code'] . "\n"
+                    . "3. Klicke dann auf „Anmeldung prüfen"",
+            ];
+        } elseif (!empty($store)) {
+            $exp = date('d.m.Y H:i', (int) $store['expires_at']);
+            $vin = $this->ReadAttributeString('vin');
+            $vinInfo = $vin !== '' ? " | VIN: $vin" : '';
+            $statusElement = [
+                'type'    => 'Label',
+                'caption' => "✅ Angemeldet – Token gültig bis $exp$vinInfo",
+            ];
+        } else {
+            $clientId = trim($this->ReadPropertyString('client_id'));
+            if ($clientId !== '') {
+                $statusElement = [
+                    'type'    => 'Label',
+                    'caption' => "⚠️ Nicht angemeldet – klicke auf „Anmeldung starten"",
+                ];
+            }
+        }
+
+        if ($statusElement !== null) {
+            array_splice($form['elements'], 1, 0, [$statusElement]);
+        }
+
+        return json_encode($form);
+    }
+
+    // ─── Public methods ───────────────────────────────────────────────────────
+
+    /** Step 1: Starts Device Code Flow, shows code/URL in form */
+    public function StartDeviceAuth(): void
+    {
+        $clientId = trim($this->ReadPropertyString('client_id'));
+        if ($clientId === '') {
+            $this->LogMessage('BMW CarData: Bitte zuerst die Client-ID konfigurieren.', KL_WARNING);
+            return;
+        }
+
+        try {
+            $pending = BMWCarDataAuth::startDeviceCodeFlow($clientId);
+            $pending['expires_at'] = time() + (int) ($pending['expires_in'] ?? 300);
+            $this->WriteAttributeString('pending_auth', json_encode($pending));
+            $this->SetStatus(203);
+
+            $this->LogMessage(
+                "BMW CarData: Anmeldung starten – öffne {$pending['verification_uri']} "
+                . "und gib Code ein: {$pending['user_code']}",
+                KL_MESSAGE
+            );
+        } catch (\Exception $e) {
+            $this->LogMessage('BMW CarData StartDeviceAuth: ' . $e->getMessage(), KL_ERROR);
+            $this->SetStatus(200);
+        }
+    }
+
+    /** Step 2: Polls once for the token; call after completing browser auth */
+    public function CheckDeviceAuth(): void
+    {
+        $pending = $this->readPendingAuth();
+        if (empty($pending)) {
+            $this->LogMessage('BMW CarData: Keine laufende Anmeldung. Bitte „Anmeldung starten" klicken.', KL_WARNING);
+            return;
+        }
+
+        $clientId = trim($this->ReadPropertyString('client_id'));
+
+        try {
+            $store = BMWCarDataAuth::pollForToken(
+                $clientId,
+                $pending['device_code'],
+                $pending['code_verifier']
+            );
+
+            if ($store === null) {
+                $remaining = max(0, (int) $pending['expires_at'] - time());
+                $this->LogMessage(
+                    "BMW CarData: Noch nicht autorisiert. Code bitte eingeben (noch {$remaining}s).",
+                    KL_MESSAGE
+                );
+                return;
+            }
+
+            $this->saveStore($store);
+            $this->WriteAttributeString('pending_auth', '');
+            $this->SetStatus(102);
+
+            $interval = $this->ReadPropertyInteger('update_interval');
+            $this->SetTimerInterval('UpdateTimer', $interval > 0 ? $interval * 1000 : 0);
+
+            $this->LogMessage('BMW CarData: Anmeldung erfolgreich. Fahrzeugdaten werden geladen...', KL_MESSAGE);
+            $this->FetchVehicleData();
+        } catch (\Exception $e) {
+            $this->LogMessage('BMW CarData CheckDeviceAuth: ' . $e->getMessage(), KL_ERROR);
+            $this->WriteAttributeString('pending_auth', '');
+            $this->SetStatus(200);
+        }
+    }
 
     public function FetchVehicleData(): bool
     {
         try {
-            $api      = $this->createApi();
-            $vehicles = $api->fetchVehicleList();
+            $api = $this->createApi();
+            $vin = $this->ensureVin($api);
 
-            foreach ($vehicles as $vehicle) {
-                $this->updateVehicleVariables($vehicle);
+            // Ensure telematic container exists
+            $containerId = $this->ReadAttributeString('container_id');
+            if ($containerId === '') {
+                $containerId = $api->ensureContainer();
+                $this->WriteAttributeString('container_id', $containerId);
             }
 
+            // Fetch basic + telematic data
+            $basic    = $api->getBasicVehicleData($vin);
+            $telematic = $api->getTelematicData($vin, $containerId);
+
+            $this->updateVariables($vin, $basic, $telematic);
             $this->SetStatus(102);
             return true;
+        } catch (\RuntimeException $e) {
+            if (strpos($e->getMessage(), 'HTTP 401') !== false) {
+                $this->SetStatus(202);
+                $this->WriteAttributeString('oauth_store', '');
+            } else {
+                $this->SetStatus(200);
+            }
+            $this->LogMessage('BMW FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
+            return false;
         } catch (\Exception $e) {
             $this->LogMessage('BMW FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
             $this->SetStatus(200);
@@ -72,84 +209,159 @@ class BMWConnectedDrive extends IPSModule
         }
     }
 
-    public function LockDoors(string $vin): bool
-    {
-        return $this->executeRemote($vin, 'door-lock');
-    }
-
-    public function UnlockDoors(string $vin): bool
-    {
-        return $this->executeRemote($vin, 'door-unlock');
-    }
-
-    public function StartClimate(string $vin): bool
-    {
-        return $this->executeRemote($vin, 'climate-now');
-    }
-
-    public function FlashLights(string $vin): bool
-    {
-        return $this->executeRemote($vin, 'lights-flash');
-    }
-
-    public function HonkHorn(string $vin): bool
-    {
-        return $this->executeRemote($vin, 'horn-blow');
-    }
-
-    /** Clears the OAuth store, forcing a full re-login on next access. */
     public function ResetAuth(): void
     {
         $this->WriteAttributeString('oauth_store', '');
-        $this->LogMessage('BMW ConnectedDrive: OAuth-Store zurückgesetzt. Neuen hCaptcha-Token konfigurieren.', KL_MESSAGE);
+        $this->WriteAttributeString('pending_auth', '');
+        $this->WriteAttributeString('container_id', '');
+        $this->WriteAttributeString('vin', '');
+        $this->SetTimerInterval('UpdateTimer', 0);
+        $this->SetStatus(202);
+        $this->LogMessage('BMW CarData: Auth zurückgesetzt. Bitte erneut anmelden.', KL_MESSAGE);
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
-    private function createApi(): BMWApi
+    private function createApi(): BMWCarDataApi
     {
-        $store = $this->ensureValidStore();
-        return new BMWApi($this->getServer(), $store['access_token']);
-    }
-
-    private function ensureValidStore(): array
-    {
-        $auth  = new BMWAuth(
-            $this->ReadPropertyString('username'),
-            $this->ReadPropertyString('password'),
-            $this->ReadPropertyString('region')
-        );
-
-        $store = $this->readStore();
+        $clientId = trim($this->ReadPropertyString('client_id'));
+        $store    = $this->readStore();
 
         if (empty($store)) {
-            // First login – hCaptcha token optional, BMW may or may not require it
-            $hcaptcha = trim($this->ReadPropertyString('hcaptcha_token'));
-            $store = $auth->login($hcaptcha);
-            $this->saveStore($store);
-            $this->LogMessage(
-                'BMW ConnectedDrive: Erster Login erfolgreich (GCID: ' . ($store['gcid'] ?? '–') . '). '
-                . ($hcaptcha !== '' ? 'Bitte den hCaptcha-Token in der Konfiguration leeren.' : ''),
-                KL_MESSAGE
-            );
-        } else {
-            try {
-                $store = $auth->loginWithStore($store);
-                $this->saveStore($store);
-            } catch (\RuntimeException $e) {
-                $this->LogMessage('BMW ConnectedDrive: ' . $e->getMessage(), KL_ERROR);
-                throw $e;
-            }
+            throw new \RuntimeException('Nicht angemeldet. Bitte „Anmeldung starten" klicken.');
         }
 
-        return $store;
+        $store = BMWCarDataAuth::refreshIfNeeded($clientId, $store);
+        $this->saveStore($store);
+        return new BMWCarDataApi($store['access_token']);
     }
 
-    private function getServer(): string
+    private function ensureVin(BMWCarDataApi $api): string
     {
-        return strtoupper($this->ReadPropertyString('region')) === 'NA'
-            ? BMW_SERVER_NA
-            : BMW_SERVER_ROW;
+        $vin = $this->ReadAttributeString('vin');
+        if ($vin !== '') {
+            return $vin;
+        }
+
+        $mappings = $api->getVehicleMappings();
+        foreach ($mappings as $m) {
+            if (($m['type'] ?? '') === 'PRIMARY' && !empty($m['vin'])) {
+                $vin = $m['vin'];
+                break;
+            }
+        }
+        if ($vin === '' && !empty($mappings[0]['vin'])) {
+            $vin = $mappings[0]['vin'];
+        }
+        if ($vin === '') {
+            throw new \RuntimeException('Kein Fahrzeug im BMW-Account gefunden.');
+        }
+
+        $this->WriteAttributeString('vin', $vin);
+        return $vin;
+    }
+
+    private function updateVariables(string $vin, array $basic, array $telematic): void
+    {
+        // Basic vehicle data
+        $model = ($basic['modelName'] ?? '') ?: ($basic['model'] ?? '');
+        if ($model !== '') {
+            $this->setVar($vin . '_Model', 'Modell', VARIABLETYPE_STRING, $model);
+        }
+
+        // Helper to extract telematic value
+        $t = function (string $key) use ($telematic) {
+            return isset($telematic[$key]['value']) ? $telematic[$key]['value'] : null;
+        };
+
+        // Mileage
+        $val = $t('vehicle.vehicle.travelledDistance');
+        if ($val !== null) {
+            $this->setVar($vin . '_Mileage', 'Kilometerstand', VARIABLETYPE_INTEGER, (int) $val);
+        }
+
+        // Fuel
+        $val = $t('vehicle.drivetrain.fuelSystem.level');
+        if ($val !== null) {
+            $this->setVar($vin . '_FuelLevel', 'Kraftstoff (%)', VARIABLETYPE_FLOAT, (float) $val);
+        }
+        $val = $t('vehicle.drivetrain.fuelSystem.remainingFuel');
+        if ($val !== null) {
+            $this->setVar($vin . '_RemainingFuel', 'Kraftstoff (L)', VARIABLETYPE_FLOAT, (float) $val);
+        }
+
+        // Range
+        $val = $t('vehicle.drivetrain.totalRemainingRange');
+        if ($val !== null) {
+            $this->setVar($vin . '_TotalRange', 'Gesamtreichweite (km)', VARIABLETYPE_INTEGER, (int) $val);
+        }
+        $val = $t('vehicle.drivetrain.electricEngine.remainingElectricRange');
+        if ($val !== null) {
+            $this->setVar($vin . '_EVRange', 'Elektrische Reichweite (km)', VARIABLETYPE_INTEGER, (int) $val);
+        }
+
+        // EV Charging
+        $val = $t('vehicle.drivetrain.electricEngine.charging.level');
+        if ($val !== null) {
+            $this->setVar($vin . '_ChargingLevel', 'Ladestand (%)', VARIABLETYPE_INTEGER, (int) $val);
+        }
+        $val = $t('vehicle.drivetrain.electricEngine.charging.status');
+        if ($val !== null) {
+            $this->setVar($vin . '_ChargingStatus', 'Ladestatus', VARIABLETYPE_STRING, (string) $val);
+        }
+        $val = $t('vehicle.drivetrain.electricEngine.charging.timeToFullyCharged');
+        if ($val !== null) {
+            $this->setVar($vin . '_ChargingTime', 'Zeit bis Vollladung (min)', VARIABLETYPE_INTEGER, (int) $val);
+        }
+        $val = $t('vehicle.powertrain.tractionBattery.charging.port.anyPosition.isPlugged');
+        if ($val !== null) {
+            $this->setVar($vin . '_IsPlugged', 'Ladekabel', VARIABLETYPE_BOOLEAN, filter_var($val, FILTER_VALIDATE_BOOLEAN));
+        }
+
+        // Location
+        $lat = $t('vehicle.cabin.infotainment.navigation.currentLocation.latitude');
+        $lon = $t('vehicle.cabin.infotainment.navigation.currentLocation.longitude');
+        if ($lat !== null) {
+            $this->setVar($vin . '_Latitude', 'Breitengrad', VARIABLETYPE_FLOAT, (float) $lat);
+        }
+        if ($lon !== null) {
+            $this->setVar($vin . '_Longitude', 'Längengrad', VARIABLETYPE_FLOAT, (float) $lon);
+        }
+
+        // Doors & Lock
+        $val = $t('vehicle.cabin.door.lock.status');
+        if ($val !== null) {
+            $this->setVar($vin . '_Locked', 'Verriegelt', VARIABLETYPE_BOOLEAN, strtoupper((string) $val) === 'SECURED');
+        }
+
+        // 12V battery
+        $val = $t('vehicle.electricalSystem.battery.stateOfCharge');
+        if ($val !== null) {
+            $this->setVar($vin . '_Battery12V', '12V Batterie (%)', VARIABLETYPE_FLOAT, (float) $val);
+        }
+
+        // Last update timestamp
+        $this->setVar($vin . '_LastUpdate', 'Letztes Update', VARIABLETYPE_STRING, date('c'));
+    }
+
+    private function setVar(string $ident, string $name, int $type, $value): void
+    {
+        if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID) === false) {
+            switch ($type) {
+                case VARIABLETYPE_BOOLEAN:
+                    $this->RegisterVariableBoolean($ident, $name);
+                    break;
+                case VARIABLETYPE_INTEGER:
+                    $this->RegisterVariableInteger($ident, $name);
+                    break;
+                case VARIABLETYPE_FLOAT:
+                    $this->RegisterVariableFloat($ident, $name);
+                    break;
+                default:
+                    $this->RegisterVariableString($ident, $name);
+            }
+        }
+        $this->SetValue($ident, $value);
     }
 
     private function readStore(): array
@@ -167,95 +379,13 @@ class BMWConnectedDrive extends IPSModule
         $this->WriteAttributeString('oauth_store', json_encode($store));
     }
 
-    private function executeRemote(string $vin, string $service): bool
+    private function readPendingAuth(): array
     {
-        try {
-            $api = $this->createApi();
-            $api->executeRemoteService($vin, $service);
-            return true;
-        } catch (\Exception $e) {
-            $this->LogMessage("BMW Remote '$service' ($vin): " . $e->getMessage(), KL_ERROR);
-            return false;
+        $json = $this->ReadAttributeString('pending_auth');
+        if ($json === '') {
+            return [];
         }
-    }
-
-    /**
-     * Creates or updates IPS variables for a single vehicle.
-     * Variable idents use the VIN as prefix so multiple vehicles coexist.
-     */
-    private function updateVehicleVariables(array $vehicle): void
-    {
-        $vin = trim((string) ($vehicle['vin'] ?? ''));
-        if ($vin === '') {
-            return;
-        }
-
-        $state = $vehicle['state'] ?? [];
-
-        // Mileage (km)
-        $mileage = $state['currentMileage']['mileage'] ?? null;
-        if ($mileage !== null) {
-            $this->setVar($vin . '_Mileage', 'Kilometerstand', VARIABLETYPE_INTEGER, (int) $mileage);
-        }
-
-        // Battery / EV range
-        $ev = $state['electricChargingState'] ?? [];
-        if (isset($ev['chargingLevelPercent'])) {
-            $this->setVar($vin . '_BatteryLevel', 'Akkustand (%)', VARIABLETYPE_INTEGER, (int) $ev['chargingLevelPercent']);
-        }
-        if (isset($ev['remainingRangeMeter'])) {
-            $this->setVar($vin . '_RemainingRangeEV', 'Reichweite EV (km)', VARIABLETYPE_INTEGER, (int) round((float) $ev['remainingRangeMeter'] / 1000));
-        }
-
-        // Fuel level (L)
-        $fuel = $state['combustionFuelLevel']['remainingFuelLiters'] ?? null;
-        if ($fuel !== null) {
-            $this->setVar($vin . '_FuelLevel', 'Kraftstoff (L)', VARIABLETYPE_FLOAT, (float) $fuel);
-        }
-
-        // Location
-        $coords = $state['location']['coordinates'] ?? [];
-        if (isset($coords['latitude'])) {
-            $this->setVar($vin . '_Latitude', 'Breitengrad', VARIABLETYPE_FLOAT, (float) $coords['latitude']);
-        }
-        if (isset($coords['longitude'])) {
-            $this->setVar($vin . '_Longitude', 'Längengrad', VARIABLETYPE_FLOAT, (float) $coords['longitude']);
-        }
-
-        // Lock state
-        $lockState = $state['doorsState']['combinedSecurityState'] ?? null;
-        if ($lockState !== null) {
-            $this->setVar($vin . '_Locked', 'Verriegelt', VARIABLETYPE_BOOLEAN, $lockState === 'LOCKED');
-        }
-
-        // Last update timestamp (ISO 8601)
-        $this->setVar($vin . '_LastUpdate', 'Letztes Update', VARIABLETYPE_STRING, date('c'));
-    }
-
-    /**
-     * Creates an IPS variable under this instance if it doesn't exist yet,
-     * then sets its value.
-     */
-    private function setVar(string $ident, string $name, int $type, $value): void
-    {
-        $exists = @IPS_GetObjectIDByIdent($ident, $this->InstanceID) !== false;
-
-        if (!$exists) {
-            switch ($type) {
-                case VARIABLETYPE_BOOLEAN:
-                    $this->RegisterVariableBoolean($ident, $name);
-                    break;
-                case VARIABLETYPE_INTEGER:
-                    $this->RegisterVariableInteger($ident, $name);
-                    break;
-                case VARIABLETYPE_FLOAT:
-                    $this->RegisterVariableFloat($ident, $name);
-                    break;
-                default:
-                    $this->RegisterVariableString($ident, $name);
-            }
-        }
-
-        $this->SetValue($ident, $value);
+        $data = json_decode($json, true);
+        return is_array($data) ? $data : [];
     }
 }

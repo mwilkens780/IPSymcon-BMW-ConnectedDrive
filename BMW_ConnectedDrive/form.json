@@ -2,28 +2,9 @@
     "elements": [
         {
             "type": "ValidationTextBox",
-            "name": "username",
-            "caption": "BMW Account E-Mail"
-        },
-        {
-            "type": "PasswordTextBox",
-            "name": "password",
-            "caption": "Passwort"
-        },
-        {
-            "type": "Select",
-            "name": "region",
-            "caption": "Region",
-            "options": [
-                {
-                    "caption": "ROW – Rest of World (Europa)",
-                    "value": "ROW"
-                },
-                {
-                    "caption": "NA – Nordamerika",
-                    "value": "NA"
-                }
-            ]
+            "name": "client_id",
+            "caption": "BMW CarData Client-ID",
+            "validate": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         },
         {
             "type": "NumberSpinner",
@@ -31,25 +12,19 @@
             "caption": "Aktualisierungsintervall (Sekunden)",
             "minimum": 60,
             "suffix": "s"
-        },
-        {
-            "type": "ExpansionPanel",
-            "caption": "Erster Login – hCaptcha-Token",
-            "expanded": false,
-            "items": [
-                {
-                    "type": "Label",
-                    "caption": "Optional – nur ausfüllen wenn BMW einen hCaptcha-Token verlangt (Fehler im IPS-Log). Token aus BMW-App mit Proxy-Tool abfangen (z.B. HTTP Toolkit) oder Feld leer lassen und Login zuerst ohne Token versuchen."
-                },
-                {
-                    "type": "ValidationTextBox",
-                    "name": "hcaptcha_token",
-                    "caption": "hCaptcha-Token"
-                }
-            ]
         }
     ],
     "actions": [
+        {
+            "type": "Button",
+            "caption": "1. Anmeldung starten (Browser-Code generieren)",
+            "onClick": "BMWCD_StartDeviceAuth($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "2. Anmeldung prüfen (nach Browser-Freigabe klicken)",
+            "onClick": "BMWCD_CheckDeviceAuth($id);"
+        },
         {
             "type": "Button",
             "caption": "Fahrzeugdaten jetzt abrufen",
@@ -57,7 +32,7 @@
         },
         {
             "type": "Button",
-            "caption": "Auth zurücksetzen (erzwingt neuen hCaptcha-Login)",
+            "caption": "Auth zurücksetzen",
             "onClick": "BMWCD_ResetAuth($id);"
         }
     ],
@@ -70,7 +45,7 @@
         {
             "code": 102,
             "icon": "active",
-            "caption": "Aktiv"
+            "caption": "Verbunden"
         },
         {
             "code": 200,
@@ -80,7 +55,17 @@
         {
             "code": 201,
             "icon": "inactive",
-            "caption": "Nicht konfiguriert – Benutzername und Passwort eintragen"
+            "caption": "Nicht konfiguriert – Client-ID eintragen"
+        },
+        {
+            "code": 202,
+            "icon": "inactive",
+            "caption": "Anmeldung erforderlich – Schritt 1 klicken"
+        },
+        {
+            "code": 203,
+            "icon": "inactive",
+            "caption": "Warte auf Browser-Anmeldung – Schritt 2 nach Code-Eingabe klicken"
         }
     ]
 }

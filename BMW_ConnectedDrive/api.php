@@ -2,174 +2,195 @@
 
 declare(strict_types=1);
 
-if (!defined('BMW_SERVER_ROW')) {
+if (!defined('CARDATA_API_BASE')) {
     require_once __DIR__ . '/auth.php';
 }
 
-// ─── BMW API Path Constants ───────────────────────────────────────────────────
+// ─── Telematic keys to include in the data container ─────────────────────────
 
-define('BMW_PATH_VEHICLE_LIST',   '/eadrax-vcs/v5/vehicle-list');
-define('BMW_PATH_REMOTE_CMD',     '/eadrax-vrccs/v4/presentation/remote-commands');
-define('BMW_PATH_REMOTE_STATUS',  '/eadrax-vrccs/v3/presentation/remote-commands/eventStatus');
+define('CARDATA_CONTAINER_NAME', 'IPSymcon_BMWCD');
 
-// ─── BMWApi ───────────────────────────────────────────────────────────────────
+define('CARDATA_TELEMATIC_KEYS', [
+    // Mileage
+    'vehicle.vehicle.travelledDistance',
+    // Fuel
+    'vehicle.drivetrain.fuelSystem.level',
+    'vehicle.drivetrain.fuelSystem.remainingFuel',
+    // Range
+    'vehicle.drivetrain.totalRemainingRange',
+    'vehicle.drivetrain.electricEngine.remainingElectricRange',
+    'vehicle.cabin.infotainment.navigation.remainingRange',
+    // EV / Charging
+    'vehicle.drivetrain.electricEngine.charging.level',
+    'vehicle.drivetrain.electricEngine.charging.status',
+    'vehicle.drivetrain.electricEngine.charging.timeToFullyCharged',
+    'vehicle.powertrain.tractionBattery.charging.port.anyPosition.isPlugged',
+    // Location
+    'vehicle.cabin.infotainment.navigation.currentLocation.latitude',
+    'vehicle.cabin.infotainment.navigation.currentLocation.longitude',
+    'vehicle.cabin.infotainment.navigation.currentLocation.heading',
+    // Doors & Lock
+    'vehicle.cabin.door.lock.status',
+    'vehicle.cabin.door.status',
+    'vehicle.cabin.door.row1.driver.isOpen',
+    'vehicle.cabin.door.row1.passenger.isOpen',
+    'vehicle.cabin.door.row2.driver.isOpen',
+    'vehicle.cabin.door.row2.passenger.isOpen',
+    'vehicle.body.trunk.door.isOpen',
+    // 12V battery
+    'vehicle.electricalSystem.battery.stateOfCharge',
+]);
 
-class BMWApi
+// ─── BMWCarDataApi ────────────────────────────────────────────────────────────
+
+class BMWCarDataApi
 {
-    private string $server;
     private string $accessToken;
-    private string $sessionId;
 
-    public function __construct(string $server, string $accessToken)
+    public function __construct(string $accessToken)
     {
-        $this->server      = rtrim($server, '/');
         $this->accessToken = $accessToken;
-        $this->sessionId   = BMWAuth::uuid4();
     }
 
-    // ─── Vehicle data ─────────────────────────────────────────────────────────
+    // ─── Vehicle endpoints ────────────────────────────────────────────────────
 
-    /**
-     * Returns a list of vehicles with full state information.
-     *
-     * @return array[]
-     * @throws \RuntimeException on HTTP or parse errors
-     */
-    public function fetchVehicleList(): array
+    /** Returns array of ['vin' => ..., 'type' => 'PRIMARY'|'SECONDARY', ...] */
+    public function getVehicleMappings(): array
     {
-        $result = $this->requestWithRetry('GET', $this->server . BMW_PATH_VEHICLE_LIST);
-        $this->assertHttpCode($result, 200, 'Fahrzeugliste');
-        $data = $this->decodeJson($result['body'], 'Fahrzeugliste');
-        return is_array($data) ? $data : [];
+        return $this->get('/customers/vehicles/mappings');
     }
 
-    // ─── Remote services ──────────────────────────────────────────────────────
-
-    /**
-     * Triggers a remote service and returns the eventId for status polling.
-     *
-     * Supported services: door-lock, door-unlock, climate-now, horn-blow, lights-flash
-     *
-     * @throws \RuntimeException on HTTP or parse errors
-     */
-    public function executeRemoteService(string $vin, string $service): string
+    public function getBasicVehicleData(string $vin): array
     {
-        $url    = $this->server . BMW_PATH_REMOTE_CMD . '/' . rawurlencode($vin) . '/' . rawurlencode($service);
-        $result = $this->requestWithRetry('POST', $url);
-        $this->assertHttpCode($result, 200, "Remote-Service '$service'");
-        $data = $this->decodeJson($result['body'], "Remote-Service '$service'");
-        return (string) ($data['eventId'] ?? '');
+        return $this->get('/customers/vehicles/' . rawurlencode($vin) . '/basicData');
     }
 
-    /**
-     * Polls the status of a previously started remote service.
-     * eventStatus.status: PENDING | DELIVERED | EXECUTED | ERROR
-     *
-     * @throws \RuntimeException on HTTP or parse errors
-     */
-    public function getRemoteServiceStatus(string $eventId): array
+    /** Returns key→{value,unit,timestamp} map from the container. */
+    public function getTelematicData(string $vin, string $containerId): array
     {
-        $url    = $this->server . BMW_PATH_REMOTE_STATUS . '?eventId=' . rawurlencode($eventId);
-        $result = $this->requestWithRetry('GET', $url);
-        $this->assertHttpCode($result, 200, 'Remote-Service-Status');
-        return $this->decodeJson($result['body'], 'Remote-Service-Status');
+        $data = $this->get(
+            '/customers/vehicles/' . rawurlencode($vin) . '/telematicData',
+            ['containerId' => $containerId]
+        );
+        return $data['telematicData'] ?? [];
     }
 
-    // ─── HTTP layer ───────────────────────────────────────────────────────────
+    // ─── Container management ─────────────────────────────────────────────────
 
-    private function requestWithRetry(string $method, string $url, ?array $body = null): array
+    public function getContainers(): array
     {
-        $delays = [2, 4];
+        return $this->get('/customers/containers');
+    }
 
-        for ($attempt = 0; $attempt <= 2; $attempt++) {
-            $result = $this->curlRequest($method, $url, $body);
+    /** Creates a container and returns its ID. */
+    public function createContainer(string $name, array $keys): string
+    {
+        $response = $this->post('/customers/containers', [
+            'name'                 => $name,
+            'purpose'              => 'IP-Symcon home automation',
+            'technicalDescriptors' => $keys,
+        ]);
+        $id = $response['id'] ?? '';
+        if ($id === '') {
+            throw new \RuntimeException('Container erstellt, aber keine ID in Antwort.');
+        }
+        return $id;
+    }
 
-            if ($result['http_code'] !== 429) {
-                return $result;
-            }
-            if ($attempt < 2) {
-                sleep($delays[$attempt]);
+    public function deleteContainer(string $containerId): void
+    {
+        $this->delete('/customers/containers/' . rawurlencode($containerId));
+    }
+
+    /** Returns existing IPSymcon container ID or creates a new one. */
+    public function ensureContainer(): string
+    {
+        $containers = $this->getContainers();
+        foreach ($containers as $c) {
+            if (($c['name'] ?? '') === CARDATA_CONTAINER_NAME) {
+                return (string) $c['id'];
             }
         }
-
-        throw new \RuntimeException("HTTP 429 Too Many Requests nach 3 Versuchen: $url");
+        return $this->createContainer(CARDATA_CONTAINER_NAME, CARDATA_TELEMATIC_KEYS);
     }
 
-    private function curlRequest(string $method, string $url, ?array $body = null): array
+    // ─── HTTP helpers ─────────────────────────────────────────────────────────
+
+    private function get(string $path, array $query = []): array
+    {
+        $url = CARDATA_API_BASE . $path;
+        if (!empty($query)) {
+            $url .= '?' . http_build_query($query);
+        }
+        return $this->request('GET', $url);
+    }
+
+    private function post(string $path, array $body): array
+    {
+        return $this->request('POST', CARDATA_API_BASE . $path, $body);
+    }
+
+    private function delete(string $path): void
+    {
+        $this->request('DELETE', CARDATA_API_BASE . $path);
+    }
+
+    private function request(string $method, string $url, ?array $body = null): array
     {
         $ch = curl_init();
 
-        $headerLines = [];
-        foreach ($this->defaultHeaders() as $k => $v) {
-            $headerLines[] = "$k: $v";
-        }
+        $headers = [
+            'Authorization: Bearer ' . $this->accessToken,
+            'x-version: v1',
+            'Accept: application/json',
+        ];
 
         $opts = [
             CURLOPT_URL            => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER         => true,
-            CURLOPT_HTTPHEADER     => $headerLines,
-            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_TIMEOUT        => 30,
+            CURLOPT_CUSTOMREQUEST  => $method,
         ];
 
-        if ($method === 'POST') {
-            $opts[CURLOPT_POST]       = true;
-            $opts[CURLOPT_POSTFIELDS] = $body !== null ? http_build_query($body) : '';
+        if ($body !== null) {
+            $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+            $headers[]                = 'Content-Type: application/json';
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         }
 
         curl_setopt_array($ch, $opts);
+        // Re-set headers after potential body update
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-        $raw        = curl_exec($ch);
-        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-        $httpCode   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError  = curl_error($ch);
+        $raw       = curl_exec($ch);
+        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($raw === false || $curlError !== '') {
-            throw new \RuntimeException("cURL-Fehler für $url: $curlError");
+            throw new \RuntimeException("cURL-Fehler: $curlError");
         }
 
-        return [
-            'http_code' => $httpCode,
-            'headers'   => substr($raw, 0, $headerSize),
-            'body'      => substr($raw, $headerSize),
-        ];
-    }
+        if ($httpCode === 204) {
+            return []; // DELETE success, no body
+        }
 
-    private function defaultHeaders(): array
-    {
-        return [
-            'Authorization'      => 'Bearer ' . $this->accessToken,
-            'user-agent'         => BMW_USER_AGENT,
-            'x-user-agent'       => BMW_X_USER_AGENT,
-            'bmw-session-id'     => $this->sessionId,
-            'x-correlation-id'   => BMWAuth::uuid4(),
-            'bmw-correlation-id' => BMWAuth::uuid4(),
-        ];
-    }
+        if ($httpCode === 401) {
+            throw new \RuntimeException('HTTP 401 – Token abgelaufen oder ungültig.');
+        }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
+        if ($httpCode >= 400) {
+            $err = json_decode($raw, true);
+            $msg = $err['exveErrorMsg'] ?? substr($raw, 0, 200);
+            throw new \RuntimeException("HTTP $httpCode: $msg");
+        }
 
-    private function decodeJson(string $body, string $context): array
-    {
-        $data = json_decode($body, true);
+        $data = json_decode($raw, true);
         if (!is_array($data)) {
-            throw new \RuntimeException(
-                "$context: Ungültige JSON-Antwort: " . substr($body, 0, 300)
-            );
+            throw new \RuntimeException('Ungültige JSON-Antwort: ' . substr($raw, 0, 200));
         }
         return $data;
-    }
-
-    private function assertHttpCode(array $result, int $expected, string $context): void
-    {
-        if ($result['http_code'] !== $expected) {
-            throw new \RuntimeException(
-                "$context: HTTP {$result['http_code']} (erwartet $expected). "
-                . 'Body: ' . substr($result['body'], 0, 300)
-            );
-        }
     }
 }

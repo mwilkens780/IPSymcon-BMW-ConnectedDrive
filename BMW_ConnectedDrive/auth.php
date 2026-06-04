@@ -2,385 +2,163 @@
 
 declare(strict_types=1);
 
-// ─── BMW API Constants ────────────────────────────────────────────────────────
+// ─── CarData API Constants ────────────────────────────────────────────────────
 
-define('BMW_SERVER_ROW', 'https://cocoapi.bmwgroup.com');
-define('BMW_SERVER_NA',  'https://cocoapi.bmwgroup.us');
+define('CARDATA_AUTH_BASE',          'https://customer.bmwgroup.com');
+define('CARDATA_API_BASE',           'https://api-cardata.bmwgroup.com');
+define('CARDATA_SCOPE',              'authenticate_user openid cardata:api:read cardata:streaming:read');
+define('CARDATA_DEVICE_CODE_PATH',   '/gcdm/oauth/device/code');
+define('CARDATA_TOKEN_PATH',         '/gcdm/oauth/token');
 
-// OCP subscription keys (base64-encoded, sent as-is in the header)
-define('OCP_KEY_ROW', 'NGYxYzg1YTMtNzU4Zi1hMzdkLWJiYjYtZjg3MDQ0OTRhY2Zh');
-define('OCP_KEY_NA',  'MzFlMTAyZjUtNmY3ZS03ZWYzLTkwNDQtZGRjZTYzODkxMzYy');
+// ─── BMWCarDataAuth ───────────────────────────────────────────────────────────
 
-define('BMW_APP_VERSION',   '4.9.2(36892)');
-define('BMW_USER_AGENT',    'Dart/3.3 (dart:io)');
-define('BMW_X_USER_AGENT',  'android(v1-1403);bmw;4.9.2(36892);row');
-define('OAUTH_CONFIG_PATH', '/eadrax-ucs/v1/presentation/oauth/config');
-
-// ─── BMWAuth ──────────────────────────────────────────────────────────────────
-
-class BMWAuth
+class BMWCarDataAuth
 {
-    private string $username;
-    private string $password;
-    private string $server;
-    private string $ocpKey;
-    private string $sessionId;
-
-    public function __construct(string $username, string $password, string $region = 'ROW')
-    {
-        $this->username  = $username;
-        $this->password  = $password;
-        $this->sessionId = self::uuid4();
-
-        if (strtoupper($region) === 'NA') {
-            $this->server = BMW_SERVER_NA;
-            $this->ocpKey = OCP_KEY_NA;
-        } else {
-            $this->server = BMW_SERVER_ROW;
-            $this->ocpKey = OCP_KEY_ROW;
-        }
-    }
-
-    // ─── Public login API ─────────────────────────────────────────────────────
-
     /**
-     * Full login with username/password + hCaptcha.
-     * Use only for the first login; the returned store can be persisted and
-     * passed to loginWithStore() for all subsequent calls.
-     *
-     * @throws \RuntimeException on HTTP or protocol errors
+     * Step 1 of Device Code Flow.
+     * Returns: device_code, user_code, verification_uri, expires_in, interval, code_verifier
      */
-    public function login(string $hcaptchaToken = ''): array
+    public static function startDeviceCodeFlow(string $clientId): array
     {
-
-        $config  = $this->fetchOAuthConfig();
         $verifier  = self::generateCodeVerifier();
         $challenge = self::createS256CodeChallenge($verifier);
-        $state     = self::generateToken();
-        $nonce     = self::generateToken();
 
-        $authenticateUrl = str_replace('/token', '/authenticate', $config['tokenEndpoint']);
-
-        $oauthBase = [
-            'client_id'             => $config['clientId'],
-            'response_type'         => 'code',
-            'scope'                 => implode(' ', (array) $config['scopes']),
-            'redirect_uri'          => $config['returnUrl'],
-            'state'                 => $state,
-            'nonce'                 => $nonce,
+        $result = self::httpPost(CARDATA_AUTH_BASE . CARDATA_DEVICE_CODE_PATH, [
+            'client_id'             => $clientId,
+            'response_type'         => 'device_code',
+            'scope'                 => CARDATA_SCOPE,
             'code_challenge'        => $challenge,
             'code_challenge_method' => 'S256',
-            'grant_type'            => 'authorization_code',
-        ];
+        ]);
 
-        // Step 2 – Authenticate with username/password; add hCaptcha header only if provided
-        $extraHeaders = trim($hcaptchaToken) !== '' ? ['hcaptchatoken' => $hcaptchaToken] : [];
-        $authData = $this->postAuthenticate(
-            $authenticateUrl,
-            array_merge($oauthBase, ['username' => $this->username, 'password' => $this->password]),
-            $extraHeaders
-        );
-
-        if (empty($authData['redirect_to'])) {
-            throw new \RuntimeException('Authenticate (Schritt 2): Kein redirect_to in Antwort.');
-        }
-
-        parse_str((string) parse_url($authData['redirect_to'], PHP_URL_QUERY), $redirectQuery);
-        $authorization = $redirectQuery['authorization'] ?? '';
-
-        if ($authorization === '') {
+        if (isset($result['error'])) {
             throw new \RuntimeException(
-                'Authenticate (Schritt 2): Kein authorization-Parameter in redirect_to: '
-                . $authData['redirect_to']
+                'Device Code Flow fehlgeschlagen: ' . $result['error']
+                . ' – ' . ($result['error_description'] ?? '')
             );
         }
 
-        // Step 3 – Second authenticate call; extracts auth code from 302 Location
-        $code = $this->authenticateForCode(
-            $authenticateUrl,
-            array_merge($oauthBase, ['authorization' => $authorization])
-        );
+        foreach (['device_code', 'user_code', 'verification_uri'] as $field) {
+            if (empty($result[$field])) {
+                throw new \RuntimeException("Device Code Response: Feld '$field' fehlt.");
+            }
+        }
 
-        // Step 4 – Exchange code for tokens
-        $tokens = $this->fetchToken(
-            $config['tokenEndpoint'],
-            $config['clientId'],
-            $config['clientSecret'],
-            [
-                'code'          => $code,
-                'code_verifier' => $verifier,
-                'redirect_uri'  => $config['returnUrl'],
-                'grant_type'    => 'authorization_code',
-            ]
-        );
-
-        return $this->buildStore($tokens);
+        return array_merge($result, ['code_verifier' => $verifier]);
     }
 
     /**
-     * Refresh or validate an existing OAuth store.
-     * Returns the store unchanged if the token is still valid; otherwise
-     * performs a token refresh.  Throws if the refresh fails (new hCaptcha
-     * login required).
-     *
-     * @throws \RuntimeException if refresh fails
+     * Step 2 of Device Code Flow – call repeatedly until user authorised.
+     * Returns null while still pending, OAuth store array on success.
+     * Throws on hard errors (expired, denied, invalid).
      */
-    public function loginWithStore(array $store): array
+    public static function pollForToken(string $clientId, string $deviceCode, string $codeVerifier): ?array
+    {
+        $result = self::httpPost(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
+            'grant_type'    => 'urn:ietf:params:oauth:grant-type:device_code',
+            'device_code'   => $deviceCode,
+            'client_id'     => $clientId,
+            'code_verifier' => $codeVerifier,
+        ]);
+
+        if (isset($result['error'])) {
+            if ($result['error'] === 'authorization_pending' || $result['error'] === 'slow_down') {
+                return null; // still waiting
+            }
+            throw new \RuntimeException(
+                'Token-Polling fehlgeschlagen: ' . $result['error']
+                . ' – ' . ($result['error_description'] ?? '')
+            );
+        }
+
+        if (empty($result['access_token'])) {
+            throw new \RuntimeException('Token-Antwort enthält kein access_token.');
+        }
+
+        return self::buildStore($result);
+    }
+
+    /**
+     * Refreshes an existing token store. Returns the store unchanged when still valid.
+     * Throws if the refresh token is expired or missing.
+     */
+    public static function refreshIfNeeded(string $clientId, array $store): array
     {
         if (!empty($store['expires_at']) && (int) $store['expires_at'] > time() + 60) {
-            return $store; // token still valid
+            return $store;
         }
 
         if (empty($store['refresh_token'])) {
+            throw new \RuntimeException('Kein Refresh-Token – erneute Anmeldung erforderlich.');
+        }
+
+        $result = self::httpPost(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
+            'grant_type'    => 'refresh_token',
+            'refresh_token' => $store['refresh_token'],
+            'client_id'     => $clientId,
+        ]);
+
+        if (isset($result['error'])) {
             throw new \RuntimeException(
-                'Kein Refresh-Token vorhanden. Neuer hCaptcha-Token für erneuten Login erforderlich.'
+                'Token-Refresh fehlgeschlagen: ' . $result['error']
+                . ' – ' . ($result['error_description'] ?? '')
             );
         }
 
-        try {
-            $config = $this->fetchOAuthConfig();
-            $tokens = $this->fetchToken(
-                $config['tokenEndpoint'],
-                $config['clientId'],
-                $config['clientSecret'],
-                [
-                    'scope'         => implode(' ', (array) $config['scopes']),
-                    'redirect_uri'  => $config['returnUrl'],
-                    'grant_type'    => 'refresh_token',
-                    'refresh_token' => $store['refresh_token'],
-                ]
-            );
-
-            $newStore = $this->buildStore($tokens);
-            // Preserve gcid if the refresh response omits it
-            if (empty($newStore['gcid']) && !empty($store['gcid'])) {
-                $newStore['gcid'] = $store['gcid'];
-            }
-            return $newStore;
-        } catch (\RuntimeException $e) {
-            throw new \RuntimeException(
-                'Token-Refresh fehlgeschlagen – neuer hCaptcha-Token benötigt. Fehler: ' . $e->getMessage()
-            );
+        if (empty($result['access_token'])) {
+            throw new \RuntimeException('Refresh-Antwort enthält kein access_token.');
         }
+
+        return self::buildStore($result);
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
-    private function fetchOAuthConfig(): array
-    {
-        $url    = $this->server . OAUTH_CONFIG_PATH;
-        $result = $this->requestWithRetry('GET', $url, ['ocp-apim-subscription-key' => $this->ocpKey]);
-        $this->assertHttpCode($result, 200, 'OAuth-Config');
-        $data = $this->decodeJson($result['body'], 'OAuth-Config');
-
-        foreach (['clientId', 'clientSecret', 'tokenEndpoint', 'scopes', 'returnUrl'] as $field) {
-            if (!isset($data[$field])) {
-                throw new \RuntimeException("OAuth-Config: Pflichtfeld '$field' fehlt.");
-            }
-        }
-        return $data;
-    }
-
-    private function postAuthenticate(string $url, array $params, array $extraHeaders = []): array
-    {
-        $result = $this->requestWithRetry('POST', $url, $extraHeaders, $params);
-        $this->assertHttpCode($result, 200, 'Authenticate (Schritt 2)');
-        return $this->decodeJson($result['body'], 'Authenticate');
-    }
-
-    private function authenticateForCode(string $url, array $params): string
-    {
-        $queryUrl = $url . '?' . http_build_query([
-            'interaction-id' => self::uuid4(),
-            'client-version' => BMW_X_USER_AGENT,
-        ]);
-
-        // Do NOT follow the redirect – we need the Location header
-        $result = $this->curlRequest('POST', $queryUrl, [], $params, false);
-
-        if ($result['http_code'] !== 302 && $result['http_code'] !== 301) {
-            throw new \RuntimeException(
-                'Authenticate (Schritt 3): Kein Redirect erhalten (HTTP ' . $result['http_code'] . ').'
-            );
-        }
-
-        if (!preg_match('/^Location:\s*(.+)$/mi', $result['headers'], $m)) {
-            throw new \RuntimeException('Authenticate (Schritt 3): Kein Location-Header in Antwort.');
-        }
-
-        $locationUrl = trim($m[1]);
-        parse_str((string) parse_url($locationUrl, PHP_URL_QUERY), $q);
-        $code = $q['code'] ?? '';
-
-        if ($code === '') {
-            throw new \RuntimeException(
-                'Authenticate (Schritt 3): Kein code-Parameter in Location-URL: ' . $locationUrl
-            );
-        }
-        return $code;
-    }
-
-    private function fetchToken(string $url, string $clientId, string $clientSecret, array $params): array
-    {
-        $result = $this->requestWithRetry(
-            'POST', $url, [], $params,
-            basicAuth: $clientId . ':' . $clientSecret
-        );
-        $this->assertHttpCode($result, 200, 'Token-Abruf');
-        $data = $this->decodeJson($result['body'], 'Token');
-
-        if (empty($data['access_token'])) {
-            throw new \RuntimeException('Token-Antwort enthält kein access_token.');
-        }
-        return $data;
-    }
-
-    private function buildStore(array $tokenResponse): array
+    private static function buildStore(array $response): array
     {
         return [
-            'access_token'  => $tokenResponse['access_token'],
-            'refresh_token' => $tokenResponse['refresh_token'] ?? '',
-            'gcid'          => $tokenResponse['gcid'] ?? '',
-            'expires_at'    => time() + (int) ($tokenResponse['expires_in'] ?? 3600),
+            'access_token'  => $response['access_token'],
+            'refresh_token' => $response['refresh_token'] ?? '',
+            'expires_at'    => time() + (int) ($response['expires_in'] ?? 3600),
         ];
     }
 
-    // ─── HTTP layer ───────────────────────────────────────────────────────────
-
-    private function requestWithRetry(
-        string  $method,
-        string  $url,
-        array   $extraHeaders = [],
-        array   $body         = [],
-        ?string $basicAuth    = null
-    ): array {
-        $delays = [2, 4];
-
-        for ($attempt = 0; $attempt <= 2; $attempt++) {
-            $result = $this->curlRequest($method, $url, $extraHeaders, $body, true, $basicAuth);
-
-            if ($result['http_code'] !== 429) {
-                return $result;
-            }
-            if ($attempt < 2) {
-                sleep($delays[$attempt]);
-            }
-        }
-
-        throw new \RuntimeException("HTTP 429 Too Many Requests nach 3 Versuchen: $url");
-    }
-
-    private function curlRequest(
-        string  $method,
-        string  $url,
-        array   $extraHeaders   = [],
-        array   $body           = [],
-        bool    $followLocation = true,
-        ?string $basicAuth      = null
-    ): array {
+    private static function httpPost(string $url, array $params): array
+    {
         $ch = curl_init();
-
-        $headerLines = [];
-        foreach (array_merge($this->defaultHeaders(), $extraHeaders) as $k => $v) {
-            $headerLines[] = "$k: $v";
-        }
-
-        $opts = [
+        curl_setopt_array($ch, [
             CURLOPT_URL            => $url,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => http_build_query($params),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER         => true,
-            CURLOPT_HTTPHEADER     => $headerLines,
-            CURLOPT_FOLLOWLOCATION => $followLocation,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_TIMEOUT        => 30,
-        ];
-
-        if ($method === 'POST') {
-            $opts[CURLOPT_POST]       = true;
-            $opts[CURLOPT_POSTFIELDS] = http_build_query($body);
-        }
-
-        if ($basicAuth !== null) {
-            $opts[CURLOPT_USERPWD]  = $basicAuth;
-            $opts[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-        }
-
-        curl_setopt_array($ch, $opts);
-
-        $raw        = curl_exec($ch);
-        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-        $httpCode   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError  = curl_error($ch);
+            CURLOPT_TIMEOUT        => 15,
+        ]);
+        $body  = curl_exec($ch);
+        $error = curl_error($ch);
         curl_close($ch);
 
-        if ($raw === false || $curlError !== '') {
-            throw new \RuntimeException("cURL-Fehler für $url: $curlError");
+        if ($body === false || $error !== '') {
+            throw new \RuntimeException("cURL-Fehler: $error");
         }
 
-        return [
-            'http_code' => $httpCode,
-            'headers'   => substr($raw, 0, $headerSize),
-            'body'      => substr($raw, $headerSize),
-        ];
+        $data = json_decode($body, true);
+        if (!is_array($data)) {
+            throw new \RuntimeException('Ungültige JSON-Antwort: ' . substr($body, 0, 200));
+        }
+        return $data;
     }
 
-    private function defaultHeaders(): array
-    {
-        return [
-            'user-agent'         => BMW_USER_AGENT,
-            'x-user-agent'       => BMW_X_USER_AGENT,
-            'bmw-session-id'     => $this->sessionId,
-            'x-correlation-id'   => self::uuid4(),
-            'bmw-correlation-id' => self::uuid4(),
-        ];
-    }
+    // ─── PKCE helpers ─────────────────────────────────────────────────────────
 
-    // ─── PKCE / token helpers (public-static for reuse in api.php) ────────────
-
-    public static function generateCodeVerifier(int $length = 86): string
+    public static function generateCodeVerifier(): string
     {
-        $bytes = random_bytes((int) ceil($length * 3 / 4));
-        return substr(rtrim(strtr(base64_encode($bytes), '+/', '-_'), '='), 0, $length);
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
     }
 
     public static function createS256CodeChallenge(string $verifier): string
     {
         return rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
-    }
-
-    public static function generateToken(int $length = 22): string
-    {
-        return substr(bin2hex(random_bytes((int) ceil($length / 2))), 0, $length);
-    }
-
-    public static function uuid4(): string
-    {
-        $data    = random_bytes(16);
-        $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
-        $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
-        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
-    }
-
-    // ─── JSON / assertion helpers ─────────────────────────────────────────────
-
-    private function decodeJson(string $body, string $context): array
-    {
-        $data = json_decode($body, true);
-        if (!is_array($data)) {
-            throw new \RuntimeException(
-                "$context: Ungültige JSON-Antwort: " . substr($body, 0, 300)
-            );
-        }
-        return $data;
-    }
-
-    private function assertHttpCode(array $result, int $expected, string $context): void
-    {
-        if ($result['http_code'] !== $expected) {
-            throw new \RuntimeException(
-                "$context: HTTP {$result['http_code']} (erwartet $expected). "
-                . 'Body: ' . substr($result['body'], 0, 300)
-            );
-        }
     }
 }
