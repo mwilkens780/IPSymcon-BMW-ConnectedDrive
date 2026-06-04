@@ -16,14 +16,30 @@
     ],
     "actions": [
         {
-            "type": "Button",
-            "caption": "1. Anmeldung starten (Browser-Code generieren)",
-            "onClick": "BMWCD_StartDeviceAuth($id);"
+            "type": "Label",
+            "caption": "── Erstanmeldung (einmalig, danach automatisch) ──────────────────"
+        },
+        {
+            "type": "Label",
+            "caption": "Schritt 1: Code generieren – danach dieses Fenster schliessen und Instanz erneut oeffnen. Der Code und die URL werden dann oben angezeigt."
         },
         {
             "type": "Button",
-            "caption": "2. Anmeldung prüfen (nach Browser-Freigabe klicken)",
+            "caption": "1. Anmeldung starten",
+            "onClick": "BMWCD_StartDeviceAuth($id);"
+        },
+        {
+            "type": "Label",
+            "caption": "Schritt 2: Browser oeffnen (URL steht oben nach Schritt 1), Code eingeben, mit BMW-Account bestaetigen. Dann hier klicken:"
+        },
+        {
+            "type": "Button",
+            "caption": "2. Anmeldung pruefen (nach Browser-Freigabe klicken)",
             "onClick": "BMWCD_CheckDeviceAuth($id);"
+        },
+        {
+            "type": "Label",
+            "caption": "── Manuell ──────────────────────────────────────────────────────"
         },
         {
             "type": "Button",
@@ -32,7 +48,7 @@
         },
         {
             "type": "Button",
-            "caption": "Auth zurücksetzen",
+            "caption": "Auth zuruecksetzen (erzwingt erneuten Device-Code-Login)",
             "onClick": "BMWCD_ResetAuth($id);"
         }
     ],

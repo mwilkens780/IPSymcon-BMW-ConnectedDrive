@@ -71,26 +71,34 @@ class BMWConnectedDrive extends IPSModule
         if (!empty($pendingAuth)) {
             $expiresIn = max(0, (int) $pendingAuth['expires_at'] - time());
             $statusElement = [
-                'type'    => 'Label',
-                'caption' => "Warte auf Browser-Anmeldung (noch {$expiresIn}s gueltig)\n"
-                    . "1. Oeffne: " . $pendingAuth['verification_uri'] . "\n"
-                    . "2. Gib diesen Code ein: " . $pendingAuth['user_code'] . "\n"
-                    . '3. Klicke dann auf "Anmeldung pruefen"',
+                'type'    => 'RowLayout',
+                'items'   => [
+                    [
+                        'type'    => 'Label',
+                        'caption' => "ANMELDUNG AUSSTEHEND (noch {$expiresIn}s gueltig)\n\n"
+                            . "1. Oeffne diesen Link im Browser:\n"
+                            . "   " . $pendingAuth['verification_uri'] . "\n\n"
+                            . "2. Gib dort diesen Code ein:\n"
+                            . "   >>> " . $pendingAuth['user_code'] . " <<<\n\n"
+                            . "3. Mit BMW-Account bestaetigen\n"
+                            . "4. Dann unten auf '2. Anmeldung pruefen' klicken",
+                    ],
+                ],
             ];
         } elseif (!empty($store)) {
-            $exp = date('d.m.Y H:i', (int) $store['expires_at']);
-            $vin = $this->ReadAttributeString('vin');
-            $vinInfo = $vin !== '' ? " | VIN: $vin" : '';
+            $exp     = date('d.m.Y H:i', (int) $store['expires_at']);
+            $vin     = $this->ReadAttributeString('vin');
+            $vinInfo = $vin !== '' ? "\nFahrzeug-VIN: $vin" : '';
             $statusElement = [
                 'type'    => 'Label',
-                'caption' => "Angemeldet - Token gueltig bis $exp$vinInfo",
+                'caption' => "Angemeldet\nToken gueltig bis: $exp (wird automatisch erneuert)$vinInfo",
             ];
         } else {
             $clientId = trim($this->ReadPropertyString('client_id'));
             if ($clientId !== '') {
                 $statusElement = [
                     'type'    => 'Label',
-                    'caption' => 'Nicht angemeldet - klicke auf "Anmeldung starten"',
+                    'caption' => "Nicht angemeldet.\nSchritt 1: 'Anmeldung starten' klicken, dann dieses Fenster schliessen und wieder oeffnen.",
                 ];
             }
         }
