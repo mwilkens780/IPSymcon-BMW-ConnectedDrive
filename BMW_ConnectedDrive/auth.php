@@ -7,9 +7,9 @@ declare(strict_types=1);
 define('BMW_SERVER_ROW', 'https://cocoapi.bmwgroup.com');
 define('BMW_SERVER_NA',  'https://cocoapi.bmwgroup.us');
 
-// OCP subscription keys (plain text)
-define('OCP_KEY_ROW', '4f1c85a3-758f-a37d-bbb6-f87044494acfa');
-define('OCP_KEY_NA',  '31e102f5-6f7e-7ef3-9044-ddce63891362');
+// OCP subscription keys (base64-encoded, sent as-is in the header)
+define('OCP_KEY_ROW', 'NGYxYzg1YTMtNzU4Zi1hMzdkLWJiYjYtZjg3MDQ0OTRhY2Zh');
+define('OCP_KEY_NA',  'MzFlMTAyZjUtNmY3ZS03ZWYzLTkwNDQtZGRjZTYzODkxMzYy');
 
 define('BMW_APP_VERSION',   '4.9.2(36892)');
 define('BMW_USER_AGENT',    'Dart/3.3 (dart:io)');
