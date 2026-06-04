@@ -123,19 +123,13 @@ class BMWConnectedDrive extends IPSModule
         $store = $this->readStore();
 
         if (empty($store)) {
-            // First login – hCaptcha token mandatory
+            // First login – hCaptcha token optional, BMW may or may not require it
             $hcaptcha = trim($this->ReadPropertyString('hcaptcha_token'));
-            if ($hcaptcha === '') {
-                throw new \RuntimeException(
-                    'OAuth-Store leer und kein hCaptcha-Token konfiguriert. '
-                    . 'Einmaligen Token in der Modulkonfiguration unter "hcaptcha_token" eintragen.'
-                );
-            }
             $store = $auth->login($hcaptcha);
             $this->saveStore($store);
             $this->LogMessage(
                 'BMW ConnectedDrive: Erster Login erfolgreich (GCID: ' . ($store['gcid'] ?? '–') . '). '
-                . 'Bitte den hCaptcha-Token in der Konfiguration leeren.',
+                . ($hcaptcha !== '' ? 'Bitte den hCaptcha-Token in der Konfiguration leeren.' : ''),
                 KL_MESSAGE
             );
         } else {

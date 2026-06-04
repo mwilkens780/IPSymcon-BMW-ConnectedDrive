@@ -48,17 +48,10 @@ class BMWAuth
      * Use only for the first login; the returned store can be persisted and
      * passed to loginWithStore() for all subsequent calls.
      *
-     * @throws \InvalidArgumentException if hcaptchaToken is empty
-     * @throws \RuntimeException         on HTTP or protocol errors
+     * @throws \RuntimeException on HTTP or protocol errors
      */
-    public function login(string $hcaptchaToken): array
+    public function login(string $hcaptchaToken = ''): array
     {
-        if (trim($hcaptchaToken) === '') {
-            throw new \InvalidArgumentException(
-                'hCaptcha-Token ist erforderlich für den ersten Login. '
-                . 'Token unter https://hcaptcha.com/demo generieren.'
-            );
-        }
 
         $config  = $this->fetchOAuthConfig();
         $verifier  = self::generateCodeVerifier();
@@ -80,11 +73,12 @@ class BMWAuth
             'grant_type'            => 'authorization_code',
         ];
 
-        // Step 2 – Authenticate with username/password + hCaptcha header
+        // Step 2 – Authenticate with username/password; add hCaptcha header only if provided
+        $extraHeaders = trim($hcaptchaToken) !== '' ? ['hcaptchatoken' => $hcaptchaToken] : [];
         $authData = $this->postAuthenticate(
             $authenticateUrl,
             array_merge($oauthBase, ['username' => $this->username, 'password' => $this->password]),
-            ['hcaptchatoken' => $hcaptchaToken]
+            $extraHeaders
         );
 
         if (empty($authData['redirect_to'])) {
