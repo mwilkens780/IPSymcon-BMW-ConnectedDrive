@@ -14,7 +14,7 @@
             "type": "NumberSpinner",
             "name": "update_interval",
             "caption": "Aktualisierungsintervall (Sekunden)",
-            "minimum": 60,
+            "minimum": 300,
             "suffix": "s"
         },
         {

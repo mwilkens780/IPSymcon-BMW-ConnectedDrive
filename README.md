@@ -50,7 +50,7 @@ Dein Fahrzeug muss im BMW CarData-Portal für Datenzugriff freigegeben sein. Die
 | Feld | Beschreibung |
 |------|-------------|
 | `client_id` | UUID aus dem BMW CarData Portal |
-| `update_interval` | Aktualisierungsintervall in Sekunden (min. 60, Standard: 300) |
+| `update_interval` | Aktualisierungsintervall in Sekunden (min. 300, Standard: 300) |
 
 ---
 
@@ -118,7 +118,7 @@ BMWCD_ResetAuth($id);              // Token löschen, neuen Login erzwingen
 ## Hinweise zur API
 
 - **Keine Remote Services**: Die BMW CarData API ist rein lesend (Telemetrie, Ladeverlauf, Reifendiagnose). Türen sperren/öffnen, Klimaanlage starten etc. sind über diese API nicht möglich.
-- **Rate Limiting**: BMW limitiert die Anfragen. Das Modul hält standardmäßig 300 Sekunden Abstand (konfigurierbar, Minimum 60s).
+- **Rate Limiting**: BMW limitiert auf täglich ca. 500 Anfragen pro Fahrzeug. Das Modul hält mindestens 300 Sekunden Abstand (konfigurierbar). Kürzere Intervalle führen zu HTTP 403 „API rate limit reached".
 - **Telematik-Container**: Das Modul legt automatisch einen Container (`IPSymcon_BMWCD`) in der BMW CarData API an, der die gewünschten Telematik-Keys abonniert. Dieser wird wiederverwendet.
 
 ---
@@ -143,6 +143,8 @@ Diese Sektion dokumentiert Erkenntnisse aus der Entwicklung für zukünftige Mai
 |---------|---------|--------|
 | HTTP 401 auf `cocoapi.bmwgroup.com` | BMW hat die inoffizielle API (bimmer_connected) am 29.09.2025 abgeschaltet | Auf offizielle CarData API (`api-cardata.bmwgroup.com`) umgestellt |
 | Container-ID fehlt in API-Antwort | API gibt Feld `containerId` zurück, nicht `id` | `$response['containerId']` statt `$response['id']` |
+| HTTP 403 „API rate limit reached" | BMW erlaubt nur ~500 Anfragen/Tag pro Fahrzeug | Minimum-Intervall auf 300s gesetzt |
+| Instanz fehlerhaft nach Modul-Umbenennung | IPS leitet Klassennamen aus `name`-Feld in module.json ab (Leerzeichen entfernt): „BMW CarData" → `BMWCarData` | Klasse in module.php muss exakt diesem Schema entsprechen |
 | BMW CarData Portal-Seite nicht erreichbar | `bmw-cardata.bmwgroup.com` (ohne Pfad) gibt 403 | Direktlink: `.../customer/public` oder `.../thirdparty/public/home` |
 | `hcaptcha.com/demo` nicht mehr verfügbar | Seite eingestellt | Irrelevant – altes Authentifizierungsverfahren wurde durch Device Code Flow ersetzt |
 
