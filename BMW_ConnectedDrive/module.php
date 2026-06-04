@@ -10,7 +10,7 @@ require_once __DIR__ . '/api.php';
 // IS_INACTIVE  = 104
 // IS_NOTCREATED = 201
 
-class BMW_ConnectedDrive extends IPSModule
+class BMWConnectedDrive extends IPSModule
 {
     // ─── Module lifecycle ─────────────────────────────────────────────────────
 
