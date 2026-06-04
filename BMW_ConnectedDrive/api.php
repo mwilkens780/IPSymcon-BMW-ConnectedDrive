@@ -90,9 +90,9 @@ class BMWCarDataApi
             'purpose'              => 'IP-Symcon home automation',
             'technicalDescriptors' => $keys,
         ]);
-        $id = $response['id'] ?? '';
+        $id = $response['containerId'] ?? $response['id'] ?? '';
         if ($id === '') {
-            throw new \RuntimeException('Container erstellt, aber keine ID in Antwort.');
+            throw new \RuntimeException('Container erstellt, aber keine containerId in Antwort. Body: ' . json_encode($response));
         }
         return $id;
     }
@@ -108,7 +108,7 @@ class BMWCarDataApi
         $containers = $this->getContainers();
         foreach ($containers as $c) {
             if (($c['name'] ?? '') === CARDATA_CONTAINER_NAME) {
-                return (string) $c['id'];
+                return (string) ($c['containerId'] ?? $c['id'] ?? '');
             }
         }
         return $this->createContainer(CARDATA_CONTAINER_NAME, CARDATA_TELEMATIC_KEYS);
