@@ -14,6 +14,11 @@
 
 declare(strict_types=1);
 
+// Guard: only run from CLI, never when included by IPS module loader
+if (php_sapi_name() !== 'cli') {
+    return;
+}
+
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/api.php';
 

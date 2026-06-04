@@ -242,17 +242,24 @@ class BMW_ConnectedDrive extends IPSModule
      * Creates an IPS variable under this instance if it doesn't exist yet,
      * then sets its value.
      */
-    private function setVar(string $ident, string $name, int $type, bool|int|float|string $value): void
+    private function setVar(string $ident, string $name, int $type, $value): void
     {
         $exists = @IPS_GetObjectIDByIdent($ident, $this->InstanceID) !== false;
 
         if (!$exists) {
-            match ($type) {
-                VARIABLETYPE_BOOLEAN => $this->RegisterVariableBoolean($ident, $name),
-                VARIABLETYPE_INTEGER => $this->RegisterVariableInteger($ident, $name),
-                VARIABLETYPE_FLOAT   => $this->RegisterVariableFloat($ident, $name),
-                default              => $this->RegisterVariableString($ident, $name),
-            };
+            switch ($type) {
+                case VARIABLETYPE_BOOLEAN:
+                    $this->RegisterVariableBoolean($ident, $name);
+                    break;
+                case VARIABLETYPE_INTEGER:
+                    $this->RegisterVariableInteger($ident, $name);
+                    break;
+                case VARIABLETYPE_FLOAT:
+                    $this->RegisterVariableFloat($ident, $name);
+                    break;
+                default:
+                    $this->RegisterVariableString($ident, $name);
+            }
         }
 
         $this->SetValue($ident, $value);

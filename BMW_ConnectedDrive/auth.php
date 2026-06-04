@@ -202,7 +202,7 @@ class BMWAuth
         ]);
 
         // Do NOT follow the redirect – we need the Location header
-        $result = $this->curlRequest('POST', $queryUrl, [], $params, followLocation: false);
+        $result = $this->curlRequest('POST', $queryUrl, [], $params, false);
 
         if ($result['http_code'] !== 302 && $result['http_code'] !== 301) {
             throw new \RuntimeException(
