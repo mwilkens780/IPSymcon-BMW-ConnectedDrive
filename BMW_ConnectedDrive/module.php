@@ -208,10 +208,10 @@ class BMWConnectedDrive extends IPSModule
             } else {
                 $this->SetStatus(200);
             }
-            $this->LogMessage('BMW FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
+            $this->LogMessage('BMW CarData FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
             return false;
         } catch (\Exception $e) {
-            $this->LogMessage('BMW FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
+            $this->LogMessage('BMW CarData FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
             $this->SetStatus(200);
             return false;
         }

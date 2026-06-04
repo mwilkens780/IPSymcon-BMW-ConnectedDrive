@@ -3,8 +3,12 @@
         {
             "type": "ValidationTextBox",
             "name": "client_id",
-            "caption": "BMW CarData Client-ID",
+            "caption": "BMW CarData Client-ID (UUID)",
             "validate": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        {
+            "type": "Label",
+            "caption": "Client-ID bekommst du unter: bmw-cardata.bmwgroup.com/customer/public (mit BMW-Account einloggen -> Client erstellen)"
         },
         {
             "type": "NumberSpinner",
@@ -12,16 +16,20 @@
             "caption": "Aktualisierungsintervall (Sekunden)",
             "minimum": 60,
             "suffix": "s"
+        },
+        {
+            "type": "Label",
+            "caption": "Datenschutz/Fahrzeugzuweisung: bmw-cardata.bmwgroup.com -> MyBMW -> Fahrzeug -> CarData (oder Direktlink in BMW-Account unter Datenschutzeinstellungen)"
         }
     ],
     "actions": [
         {
             "type": "Label",
-            "caption": "── Erstanmeldung (einmalig, danach automatisch) ──────────────────"
+            "caption": "── Erstanmeldung (einmalig, danach laeuft Token-Refresh automatisch) ──"
         },
         {
             "type": "Label",
-            "caption": "Schritt 1: Code generieren – danach dieses Fenster schliessen und Instanz erneut oeffnen. Der Code und die URL werden dann oben angezeigt."
+            "caption": "Schritt 1: Code generieren. Danach dieses Fenster schliessen und wieder oeffnen - Code und URL erscheinen dann oben."
         },
         {
             "type": "Button",
@@ -30,16 +38,16 @@
         },
         {
             "type": "Label",
-            "caption": "Schritt 2: Browser oeffnen (URL steht oben nach Schritt 1), Code eingeben, mit BMW-Account bestaetigen. Dann hier klicken:"
+            "caption": "Schritt 2: Browser oeffnen (URL siehe oben), Code eingeben, mit BMW-Account bestaetigen, dann hier klicken:"
         },
         {
             "type": "Button",
-            "caption": "2. Anmeldung pruefen (nach Browser-Freigabe klicken)",
+            "caption": "2. Anmeldung pruefen (nach Browser-Bestaetigung)",
             "onClick": "BMWCD_CheckDeviceAuth($id);"
         },
         {
             "type": "Label",
-            "caption": "── Manuell ──────────────────────────────────────────────────────"
+            "caption": "── Manuell ──────────────────────────────────────────────────────────"
         },
         {
             "type": "Button",
@@ -66,22 +74,22 @@
         {
             "code": 200,
             "icon": "error",
-            "caption": "Fehler – Details im IPS-Log"
+            "caption": "Fehler - Details im IPS-Log"
         },
         {
             "code": 201,
             "icon": "inactive",
-            "caption": "Nicht konfiguriert – Client-ID eintragen"
+            "caption": "Nicht konfiguriert - Client-ID eintragen"
         },
         {
             "code": 202,
             "icon": "inactive",
-            "caption": "Anmeldung erforderlich – Schritt 1 klicken"
+            "caption": "Anmeldung erforderlich - Schritt 1 klicken"
         },
         {
             "code": 203,
             "icon": "inactive",
-            "caption": "Warte auf Browser-Anmeldung – Schritt 2 nach Code-Eingabe klicken"
+            "caption": "Warte auf Browser-Anmeldung - Schritt 2 nach Code-Eingabe klicken"
         }
     ]
 }
