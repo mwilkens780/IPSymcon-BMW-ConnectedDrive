@@ -1,0 +1,86 @@
+{
+    "elements": [
+        {
+            "type": "ValidationTextBox",
+            "name": "username",
+            "caption": "BMW Account E-Mail"
+        },
+        {
+            "type": "PasswordTextBox",
+            "name": "password",
+            "caption": "Passwort"
+        },
+        {
+            "type": "Select",
+            "name": "region",
+            "caption": "Region",
+            "options": [
+                {
+                    "caption": "ROW – Rest of World (Europa)",
+                    "value": "ROW"
+                },
+                {
+                    "caption": "NA – Nordamerika",
+                    "value": "NA"
+                }
+            ]
+        },
+        {
+            "type": "NumberSpinner",
+            "name": "update_interval",
+            "caption": "Aktualisierungsintervall (Sekunden)",
+            "minimum": 60,
+            "suffix": "s"
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Erster Login – hCaptcha-Token",
+            "expanded": false,
+            "items": [
+                {
+                    "type": "Label",
+                    "caption": "Einmalig benötigt für den ersten Login. Token unter https://hcaptcha.com/demo generieren, nach der Nutzung wieder leeren."
+                },
+                {
+                    "type": "ValidationTextBox",
+                    "name": "hcaptcha_token",
+                    "caption": "hCaptcha-Token"
+                }
+            ]
+        }
+    ],
+    "actions": [
+        {
+            "type": "Button",
+            "caption": "Fahrzeugdaten jetzt abrufen",
+            "onClick": "BMWCD_FetchVehicleData($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Auth zurücksetzen (erzwingt neuen hCaptcha-Login)",
+            "onClick": "BMWCD_ResetAuth($id);"
+        }
+    ],
+    "status": [
+        {
+            "code": 101,
+            "icon": "inactive",
+            "caption": "Instanz wird erstellt"
+        },
+        {
+            "code": 102,
+            "icon": "active",
+            "caption": "Aktiv"
+        },
+        {
+            "code": 200,
+            "icon": "error",
+            "caption": "Fehler – Details im IPS-Log"
+        },
+        {
+            "code": 201,
+            "icon": "inactive",
+            "caption": "Nicht konfiguriert – Benutzername und Passwort eintragen"
+        }
+    ]
+}
