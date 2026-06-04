@@ -39,7 +39,7 @@
             "items": [
                 {
                     "type": "Label",
-                    "caption": "Einmalig benötigt für den ersten Login. Token unter https://hcaptcha.com/demo generieren, nach der Nutzung wieder leeren."
+                    "caption": "So erhältst du den Token (einmalig):\n1. my.bmw.com im Browser öffnen\n2. F12 → Konsole-Tab\n3. Captcha-Widget auf der Login-Seite lösen (NICHT einloggen)\n4. In der Konsole eingeben: hcaptcha.getResponse()\n5. Den ausgegebenen langen String hier einfügen\n6. Nach erfolgreichem Login dieses Feld wieder leeren!"
                 },
                 {
                     "type": "ValidationTextBox",
