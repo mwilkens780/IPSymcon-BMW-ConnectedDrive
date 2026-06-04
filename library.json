@@ -4,6 +4,7 @@
     "name": "BMW ConnectedDrive",
     "description": "BMW ConnectedDrive integration for IP-Symcon. OAuth2+PKCE authentication, vehicle data and remote services.",
     "version": "1.0",
+    "build": 1,
     "date": 1780527746,
     "url": "https://github.com/mwilkens780/IPSymcon-BMW-ConnectedDrive"
 }
