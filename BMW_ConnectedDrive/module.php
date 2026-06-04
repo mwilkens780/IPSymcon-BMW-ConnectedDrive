@@ -72,10 +72,10 @@ class BMWConnectedDrive extends IPSModule
             $expiresIn = max(0, (int) $pendingAuth['expires_at'] - time());
             $statusElement = [
                 'type'    => 'Label',
-                'caption' => "⏳ Warte auf Browser-Anmeldung (noch {$expiresIn}s gültig)\n"
-                    . "1. Öffne: " . $pendingAuth['verification_uri'] . "\n"
+                'caption' => "Warte auf Browser-Anmeldung (noch {$expiresIn}s gueltig)\n"
+                    . "1. Oeffne: " . $pendingAuth['verification_uri'] . "\n"
                     . "2. Gib diesen Code ein: " . $pendingAuth['user_code'] . "\n"
-                    . "3. Klicke dann auf „Anmeldung prüfen"",
+                    . '3. Klicke dann auf "Anmeldung pruefen"',
             ];
         } elseif (!empty($store)) {
             $exp = date('d.m.Y H:i', (int) $store['expires_at']);
@@ -83,14 +83,14 @@ class BMWConnectedDrive extends IPSModule
             $vinInfo = $vin !== '' ? " | VIN: $vin" : '';
             $statusElement = [
                 'type'    => 'Label',
-                'caption' => "✅ Angemeldet – Token gültig bis $exp$vinInfo",
+                'caption' => "Angemeldet - Token gueltig bis $exp$vinInfo",
             ];
         } else {
             $clientId = trim($this->ReadPropertyString('client_id'));
             if ($clientId !== '') {
                 $statusElement = [
                     'type'    => 'Label',
-                    'caption' => "⚠️ Nicht angemeldet – klicke auf „Anmeldung starten"",
+                    'caption' => 'Nicht angemeldet - klicke auf "Anmeldung starten"',
                 ];
             }
         }
