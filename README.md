@@ -49,7 +49,7 @@ Token generieren unter: **https://hcaptcha.com/demo**
 
 1. Token in das Konfigurationsfeld `hcaptcha_token` eintragen
 2. Konfiguration speichern (ApplyChanges)
-3. Skript ausführen: `BMW_FetchVehicleData($id);`
+3. Skript ausführen: `BMWCD_FetchVehicleData($id);`
 4. **Token im Konfigurationsfeld leeren** (einmalige Verwendung!)
 
 Ab dem zweiten Start wird der gespeicherte Refresh-Token automatisch verwendet.
@@ -79,18 +79,18 @@ Pro Fahrzeug (VIN als Prefix) werden folgende Variablen angelegt:
 $id = 12345; // Instanz-ID des Moduls
 
 // Fahrzeugdaten manuell aktualisieren
-BMW_FetchVehicleData($id);
+BMWCD_FetchVehicleData($id);
 
 // Remote Services
 $vin = 'WBAXXX123456789';
-BMW_LockDoors($id, $vin);
-BMW_UnlockDoors($id, $vin);
-BMW_StartClimate($id, $vin);
-BMW_FlashLights($id, $vin);
-BMW_HonkHorn($id, $vin);
+BMWCD_LockDoors($id, $vin);
+BMWCD_UnlockDoors($id, $vin);
+BMWCD_StartClimate($id, $vin);
+BMWCD_FlashLights($id, $vin);
+BMWCD_HonkHorn($id, $vin);
 
 // OAuth-Store zurücksetzen (erzwingt neuen hCaptcha-Login)
-BMW_ResetAuth($id);
+BMWCD_ResetAuth($id);
 ```
 
 ---

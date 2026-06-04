@@ -27,7 +27,7 @@ class BMW_ConnectedDrive extends IPSModule
         // OAuth store: access_token, refresh_token, gcid, expires_at
         $this->RegisterAttributeString('oauth_store', '');
 
-        $this->RegisterTimer('UpdateTimer', 0, 'BMW_FetchVehicleData($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('UpdateTimer', 0, 'BMWCD_FetchVehicleData($_IPS[\'TARGET\']);');
     }
 
     public function Destroy(): void
