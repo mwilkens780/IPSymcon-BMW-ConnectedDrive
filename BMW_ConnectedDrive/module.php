@@ -24,6 +24,8 @@ class BMWCarData extends IPSModule
         $this->RegisterAttributeString('pending_auth', '');
         // Primary VIN (auto-detected)
         $this->RegisterAttributeString('vin', '');
+        // Unix timestamp until which API calls are paused due to rate limiting
+        $this->RegisterAttributeString('rate_limit_until', '0');
 
         $this->RegisterTimer('UpdateTimer', 0, 'BMWCD_FetchVehicleData($_IPS[\'TARGET\']);');
     }
@@ -183,6 +185,14 @@ class BMWCarData extends IPSModule
 
     public function FetchVehicleData(): bool
     {
+        // Check if rate-limited
+        $rateLimitUntil = (int) $this->ReadAttributeString('rate_limit_until');
+        if ($rateLimitUntil > time()) {
+            $resumeAt = date('d.m.Y H:i', $rateLimitUntil);
+            $this->LogMessage("BMW CarData: API-Tageslimit erreicht, naechster Versuch ab $resumeAt.", KL_WARNING);
+            return false;
+        }
+
         try {
             $api = $this->createApi();
             $vin = $this->ensureVin($api);
@@ -195,20 +205,34 @@ class BMWCarData extends IPSModule
             }
 
             // Fetch basic + telematic data
-            $basic    = $api->getBasicVehicleData($vin);
+            $basic     = $api->getBasicVehicleData($vin);
             $telematic = $api->getTelematicData($vin, $containerId);
 
             $this->updateVariables($vin, $basic, $telematic);
+            $this->WriteAttributeString('rate_limit_until', '0');
             $this->SetStatus(102);
             return true;
         } catch (\RuntimeException $e) {
-            if (strpos($e->getMessage(), 'HTTP 401') !== false) {
+            $msg = $e->getMessage();
+            if (strpos($msg, 'HTTP 401') !== false) {
                 $this->SetStatus(202);
                 $this->WriteAttributeString('oauth_store', '');
+            } elseif (strpos($msg, 'HTTP 403') !== false && strpos($msg, 'rate limit') !== false) {
+                // Pause until next midnight UTC + 1h buffer
+                $midnight = strtotime('tomorrow midnight UTC') + 3600;
+                $this->WriteAttributeString('rate_limit_until', (string) $midnight);
+                $resumeAt = date('d.m.Y H:i', $midnight);
+                $this->LogMessage(
+                    "BMW CarData: Tageslimit der API erreicht. Naechster Versuch: $resumeAt. "
+                    . "Tipp: Nur eine aktive Instanz betreiben und Intervall >= 300s.",
+                    KL_WARNING
+                );
+                $this->SetStatus(102); // not an error, just paused
+                return false;
             } else {
                 $this->SetStatus(200);
             }
-            $this->LogMessage('BMW CarData FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
+            $this->LogMessage('BMW CarData FetchVehicleData: ' . $msg, KL_ERROR);
             return false;
         } catch (\Exception $e) {
             $this->LogMessage('BMW CarData FetchVehicleData: ' . $e->getMessage(), KL_ERROR);
