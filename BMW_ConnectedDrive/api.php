@@ -10,36 +10,7 @@ if (!defined('CARDATA_API_BASE')) {
 
 define('CARDATA_CONTAINER_NAME', 'IPSymcon_BMWCD');
 
-define('CARDATA_TELEMATIC_KEYS', [
-    // Mileage
-    'vehicle.vehicle.travelledDistance',
-    // Fuel
-    'vehicle.drivetrain.fuelSystem.level',
-    'vehicle.drivetrain.fuelSystem.remainingFuel',
-    // Range
-    'vehicle.drivetrain.totalRemainingRange',
-    'vehicle.drivetrain.electricEngine.remainingElectricRange',
-    'vehicle.cabin.infotainment.navigation.remainingRange',
-    // EV / Charging
-    'vehicle.drivetrain.electricEngine.charging.level',
-    'vehicle.drivetrain.electricEngine.charging.status',
-    'vehicle.drivetrain.electricEngine.charging.timeToFullyCharged',
-    'vehicle.powertrain.tractionBattery.charging.port.anyPosition.isPlugged',
-    // Location
-    'vehicle.cabin.infotainment.navigation.currentLocation.latitude',
-    'vehicle.cabin.infotainment.navigation.currentLocation.longitude',
-    'vehicle.cabin.infotainment.navigation.currentLocation.heading',
-    // Doors & Lock
-    'vehicle.cabin.door.lock.status',
-    'vehicle.cabin.door.status',
-    'vehicle.cabin.door.row1.driver.isOpen',
-    'vehicle.cabin.door.row1.passenger.isOpen',
-    'vehicle.cabin.door.row2.driver.isOpen',
-    'vehicle.cabin.door.row2.passenger.isOpen',
-    'vehicle.body.trunk.door.isOpen',
-    // 12V battery
-    'vehicle.electricalSystem.battery.stateOfCharge',
-]);
+// Keys are configured per-instance via module properties (see module.php getKeyMap)
 
 // ─── BMWCarDataApi ────────────────────────────────────────────────────────────
 
@@ -102,8 +73,11 @@ class BMWCarDataApi
         $this->delete('/customers/containers/' . rawurlencode($containerId));
     }
 
-    /** Returns existing IPSymcon container ID or creates a new one. */
-    public function ensureContainer(): string
+    /**
+     * Returns the existing IPSymcon container ID or creates a new one
+     * with the given telematic keys.
+     */
+    public function ensureContainer(array $keys): string
     {
         $containers = $this->getContainers();
         foreach ($containers as $c) {
@@ -111,7 +85,7 @@ class BMWCarDataApi
                 return (string) ($c['containerId'] ?? $c['id'] ?? '');
             }
         }
-        return $this->createContainer(CARDATA_CONTAINER_NAME, CARDATA_TELEMATIC_KEYS);
+        return $this->createContainer(CARDATA_CONTAINER_NAME, $keys);
     }
 
     // ─── HTTP helpers ─────────────────────────────────────────────────────────

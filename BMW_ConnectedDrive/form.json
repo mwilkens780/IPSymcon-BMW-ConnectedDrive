@@ -8,28 +8,117 @@
         },
         {
             "type": "Label",
-            "caption": "Client-ID bekommst du unter: bmw-cardata.bmwgroup.com/customer/public (mit BMW-Account einloggen -> Client erstellen)"
+            "caption": "Client-ID: bmw-cardata.bmwgroup.com/customer/public  |  Fahrzeugfreigabe: bmw-cardata.bmwgroup.com -> MyBMW -> Fahrzeug -> CarData"
         },
         {
             "type": "NumberSpinner",
             "name": "update_interval",
-            "caption": "Aktualisierungsintervall (Sekunden)",
+            "caption": "Aktualisierungsintervall (Sekunden, min. 300 wegen BMW Rate-Limit)",
             "minimum": 300,
             "suffix": "s"
         },
         {
-            "type": "Label",
-            "caption": "Datenschutz/Fahrzeugzuweisung: bmw-cardata.bmwgroup.com -> MyBMW -> Fahrzeug -> CarData (oder Direktlink in BMW-Account unter Datenschutzeinstellungen)"
+            "type": "ExpansionPanel",
+            "caption": "Allgemein (alle Fahrzeuge)",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_mileage",   "caption": "Kilometerstand"},
+                        {"type": "CheckBox", "name": "key_locked",    "caption": "Verriegelt"},
+                        {"type": "CheckBox", "name": "key_door_all",  "caption": "Tuer-Gesamtstatus"}
+                    ]
+                },
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_lat",       "caption": "GPS Breitengrad"},
+                        {"type": "CheckBox", "name": "key_lon",       "caption": "GPS Laengengrad"},
+                        {"type": "CheckBox", "name": "key_heading",   "caption": "Fahrtrichtung"}
+                    ]
+                },
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_batt12v",   "caption": "12V-Batterie (%)"},
+                        {"type": "CheckBox", "name": "key_nav_range", "caption": "Reichweite (Navi)"}
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Verbrenner / Hybrid (ICE, PHEV)",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_fuel_pct",  "caption": "Kraftstoff (%)"},
+                        {"type": "CheckBox", "name": "key_fuel_l",    "caption": "Kraftstoff (L)"},
+                        {"type": "CheckBox", "name": "key_range_tot", "caption": "Gesamtreichweite"}
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Elektro / Plug-in Hybrid (BEV, PHEV)",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_ev_level",   "caption": "Ladestand (%)"},
+                        {"type": "CheckBox", "name": "key_ev_status",  "caption": "Ladestatus"},
+                        {"type": "CheckBox", "name": "key_ev_range",   "caption": "EV-Reichweite"}
+                    ]
+                },
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_ev_time",    "caption": "Zeit bis Vollladung"},
+                        {"type": "CheckBox", "name": "key_ev_plugged", "caption": "Ladekabel"}
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Einzelne Tueren, Kofferraum & Fenster",
+            "expanded": false,
+            "items": [
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_door_fl", "caption": "Tuer vorne links"},
+                        {"type": "CheckBox", "name": "key_door_fr", "caption": "Tuer vorne rechts"},
+                        {"type": "CheckBox", "name": "key_door_rl", "caption": "Tuer hinten links"},
+                        {"type": "CheckBox", "name": "key_door_rr", "caption": "Tuer hinten rechts"},
+                        {"type": "CheckBox", "name": "key_trunk",   "caption": "Kofferraum"}
+                    ]
+                },
+                {
+                    "type": "RowLayout",
+                    "items": [
+                        {"type": "CheckBox", "name": "key_win_fl", "caption": "Fenster vorne links"},
+                        {"type": "CheckBox", "name": "key_win_fr", "caption": "Fenster vorne rechts"},
+                        {"type": "CheckBox", "name": "key_win_rl", "caption": "Fenster hinten links"},
+                        {"type": "CheckBox", "name": "key_win_rr", "caption": "Fenster hinten rechts"}
+                    ]
+                }
+            ]
         }
     ],
     "actions": [
         {
             "type": "Label",
-            "caption": "── Erstanmeldung (einmalig, danach laeuft Token-Refresh automatisch) ──"
+            "caption": "── Erstanmeldung (einmalig) ─────────────────────────────────────────"
         },
         {
             "type": "Label",
-            "caption": "Schritt 1: Code generieren. Danach dieses Fenster schliessen und wieder oeffnen - Code und URL erscheinen dann oben."
+            "caption": "Schritt 1: Code generieren. Danach dieses Fenster schliessen und wieder oeffnen – Code und URL erscheinen dann oben."
         },
         {
             "type": "Button",
@@ -38,7 +127,7 @@
         },
         {
             "type": "Label",
-            "caption": "Schritt 2: Browser oeffnen (URL siehe oben), Code eingeben, mit BMW-Account bestaetigen, dann hier klicken:"
+            "caption": "Schritt 2: Browser oeffnen (URL oben), Code eingeben, BMW-Account bestaetigen, dann hier klicken:"
         },
         {
             "type": "Button",
@@ -61,35 +150,11 @@
         }
     ],
     "status": [
-        {
-            "code": 101,
-            "icon": "inactive",
-            "caption": "Instanz wird erstellt"
-        },
-        {
-            "code": 102,
-            "icon": "active",
-            "caption": "Verbunden"
-        },
-        {
-            "code": 200,
-            "icon": "error",
-            "caption": "Fehler - Details im IPS-Log"
-        },
-        {
-            "code": 201,
-            "icon": "inactive",
-            "caption": "Nicht konfiguriert - Client-ID eintragen"
-        },
-        {
-            "code": 202,
-            "icon": "inactive",
-            "caption": "Anmeldung erforderlich - Schritt 1 klicken"
-        },
-        {
-            "code": 203,
-            "icon": "inactive",
-            "caption": "Warte auf Browser-Anmeldung - Schritt 2 nach Code-Eingabe klicken"
-        }
+        {"code": 101, "icon": "inactive", "caption": "Instanz wird erstellt"},
+        {"code": 102, "icon": "active",   "caption": "Verbunden"},
+        {"code": 200, "icon": "error",    "caption": "Fehler - Details im IPS-Log"},
+        {"code": 201, "icon": "inactive", "caption": "Nicht konfiguriert - Client-ID eintragen"},
+        {"code": 202, "icon": "inactive", "caption": "Anmeldung erforderlich - Schritt 1 klicken"},
+        {"code": 203, "icon": "inactive", "caption": "Warte auf Browser-Anmeldung - Schritt 2 nach Code-Eingabe klicken"}
     ]
 }
