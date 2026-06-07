@@ -105,17 +105,28 @@ class BMWCarData extends IPSModule
         $statusElement = null;
 
         if (!empty($pendingAuth)) {
-            $expiresIn     = max(0, (int) $pendingAuth['expires_at'] - time());
-            $statusElement = [
-                'type'    => 'Label',
-                'caption' => "ANMELDUNG AUSSTEHEND (noch {$expiresIn}s gueltig)\n\n"
+            $expiresIn   = max(0, (int) $pendingAuth['expires_at'] - time());
+            $uriComplete = $pendingAuth['verification_uri_complete'] ?? '';
+            $uriBase     = $pendingAuth['verification_uri'] ?? '';
+            $userCode    = $pendingAuth['user_code'] ?? '';
+
+            if ($uriComplete !== '') {
+                $caption = "ANMELDUNG AUSSTEHEND (noch {$expiresIn}s gueltig)\n\n"
+                    . "1. Oeffne diesen Link im Browser (Code bereits enthalten):\n"
+                    . "   " . $uriComplete . "\n\n"
+                    . "2. Mit BMW-Account bestaetigen\n"
+                    . '3. Dann unten auf "2. Anmeldung pruefen" klicken';
+            } else {
+                $caption = "ANMELDUNG AUSSTEHEND (noch {$expiresIn}s gueltig)\n\n"
                     . "1. Oeffne diesen Link im Browser:\n"
-                    . "   " . $pendingAuth['verification_uri'] . "\n\n"
+                    . "   " . $uriBase . "\n\n"
                     . "2. Gib dort diesen Code ein:\n"
-                    . "   >>> " . $pendingAuth['user_code'] . " <<<\n\n"
+                    . "   >>> " . $userCode . " <<<\n\n"
                     . "3. Mit BMW-Account bestaetigen\n"
-                    . '4. Dann unten auf "2. Anmeldung pruefen" klicken',
-            ];
+                    . '4. Dann unten auf "2. Anmeldung pruefen" klicken';
+            }
+
+            $statusElement = ['type' => 'Label', 'caption' => $caption];
         } elseif (!empty($store)) {
             $exp           = date('d.m.Y H:i', (int) $store['expires_at']);
             $vin           = $this->ReadAttributeString('vin');
