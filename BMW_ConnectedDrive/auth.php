@@ -75,7 +75,16 @@ class BMWCarDataAuth
             throw new \RuntimeException('Token-Antwort enthält kein access_token.');
         }
 
-        return self::buildStore($result);
+        $store = self::buildStore($result);
+
+        // Temporary debug: capture what BMW returned so we can diagnose refresh issues
+        $debugFields = [];
+        foreach ($result as $k => $v) {
+            $debugFields[] = $k . '=' . (is_string($v) ? strlen($v) . 'chars' : json_encode($v));
+        }
+        $store['_debug_poll_response'] = implode(', ', $debugFields);
+
+        return $store;
     }
 
     /**

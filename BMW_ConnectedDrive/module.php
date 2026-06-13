@@ -201,6 +201,9 @@ class BMWCarData extends IPSModule
                 return;
             }
 
+            if (isset($store['_debug_poll_response'])) {
+                $this->LogMessage('BMW CarData DEBUG token response: ' . $store['_debug_poll_response'], KL_MESSAGE);
+            }
             $this->saveStore($store);
             $this->WriteAttributeString('pending_auth', '');
             $this->SetStatus(102);
