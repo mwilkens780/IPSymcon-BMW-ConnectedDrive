@@ -92,7 +92,8 @@ class BMWCarDataAuth
             throw new \RuntimeException('Kein Refresh-Token – erneute Anmeldung erforderlich.');
         }
 
-        $result = self::httpPost(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
+        $rtLen = strlen($store['refresh_token']);
+        [$result, $rawBody] = self::httpPostWithRaw(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
             'grant_type'    => 'refresh_token',
             'refresh_token' => $store['refresh_token'],
             'client_id'     => $clientId,
@@ -103,6 +104,9 @@ class BMWCarDataAuth
             throw new \RuntimeException(
                 'Token-Refresh fehlgeschlagen: ' . $result['error']
                 . ' – ' . ($result['error_description'] ?? '')
+                . ' | rt_len=' . $rtLen
+                . ' | client_id=' . $clientId
+                . ' | response=' . substr($rawBody, 0, 500)
             );
         }
 
@@ -126,6 +130,12 @@ class BMWCarDataAuth
 
     private static function httpPost(string $url, array $params): array
     {
+        [$data] = self::httpPostWithRaw($url, $params);
+        return $data;
+    }
+
+    private static function httpPostWithRaw(string $url, array $params): array
+    {
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL            => $url,
@@ -148,7 +158,7 @@ class BMWCarDataAuth
         if (!is_array($data)) {
             throw new \RuntimeException('Ungültige JSON-Antwort: ' . substr($body, 0, 200));
         }
-        return $data;
+        return [$data, (string) $body];
     }
 
     // ─── PKCE helpers ─────────────────────────────────────────────────────────
