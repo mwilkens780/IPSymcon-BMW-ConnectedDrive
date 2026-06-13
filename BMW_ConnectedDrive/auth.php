@@ -96,6 +96,7 @@ class BMWCarDataAuth
             'grant_type'    => 'refresh_token',
             'refresh_token' => $store['refresh_token'],
             'client_id'     => $clientId,
+            'scope'         => CARDATA_SCOPE,
         ]);
 
         if (isset($result['error'])) {
