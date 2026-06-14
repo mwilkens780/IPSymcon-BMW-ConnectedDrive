@@ -164,11 +164,32 @@ class BMWCarData extends IPSModule
             $pending['expires_at'] = time() + (int) ($pending['expires_in'] ?? 300);
             $this->WriteAttributeString('pending_auth', json_encode($pending));
             $this->SetStatus(203);
-            $this->LogMessage(
-                "BMW CarData: Anmeldung starten – oeffne {$pending['verification_uri']} "
-                . "und gib Code ein: {$pending['user_code']}",
-                KL_MESSAGE
-            );
+
+            // Log all fields BMW returned for diagnostics
+            $debugFields = [];
+            foreach ($pending as $k => $v) {
+                if ($k === 'code_verifier') {
+                    continue;
+                }
+                $debugFields[] = $k . '=' . (is_string($v) ? '"' . $v . '"' : json_encode($v));
+            }
+            $this->LogMessage('BMW CarData DEBUG device code response: ' . implode(', ', $debugFields), KL_MESSAGE);
+
+            $uriComplete = $pending['verification_uri_complete'] ?? '';
+            if ($uriComplete !== '') {
+                $this->LogMessage(
+                    "BMW CarData: Anmeldung starten – oeffne direkt (Code enthalten): {$uriComplete}",
+                    KL_MESSAGE
+                );
+            } else {
+                $this->LogMessage(
+                    "BMW CarData: Anmeldung starten – oeffne {$pending['verification_uri']} "
+                    . "und gib Code ein: {$pending['user_code']}",
+                    KL_MESSAGE
+                );
+            }
+
+            $this->ReloadForm();
         } catch (\Exception $e) {
             $this->LogMessage('BMW CarData StartDeviceAuth: ' . $e->getMessage(), KL_ERROR);
             $this->SetStatus(200);

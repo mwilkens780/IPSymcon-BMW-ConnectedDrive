@@ -118,7 +118,7 @@
         },
         {
             "type": "Label",
-            "caption": "Schritt 1: Code generieren. Danach dieses Fenster schliessen und wieder oeffnen – Code und URL erscheinen dann oben."
+            "caption": "Schritt 1: Code generieren. URL und Code erscheinen dann oben im Formular."
         },
         {
             "type": "Button",
