@@ -75,16 +75,7 @@ class BMWCarDataAuth
             throw new \RuntimeException('Token-Antwort enthält kein access_token.');
         }
 
-        $store = self::buildStore($result);
-
-        // Temporary debug: capture what BMW returned so we can diagnose refresh issues
-        $debugFields = [];
-        foreach ($result as $k => $v) {
-            $debugFields[] = $k . '=' . (is_string($v) ? strlen($v) . 'chars' : json_encode($v));
-        }
-        $store['_debug_poll_response'] = implode(', ', $debugFields);
-
-        return $store;
+        return self::buildStore($result);
     }
 
     /**
@@ -101,8 +92,7 @@ class BMWCarDataAuth
             throw new \RuntimeException('Kein Refresh-Token – erneute Anmeldung erforderlich.');
         }
 
-        $rtLen = strlen($store['refresh_token']);
-        [$result, $rawBody] = self::httpPostWithRaw(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
+        $result = self::httpPost(CARDATA_AUTH_BASE . CARDATA_TOKEN_PATH, [
             'grant_type'    => 'refresh_token',
             'refresh_token' => $store['refresh_token'],
             'client_id'     => $clientId,
@@ -113,9 +103,6 @@ class BMWCarDataAuth
             throw new \RuntimeException(
                 'Token-Refresh fehlgeschlagen: ' . $result['error']
                 . ' – ' . ($result['error_description'] ?? '')
-                . ' | rt_len=' . $rtLen
-                . ' | client_id=' . $clientId
-                . ' | response=' . substr($rawBody, 0, 500)
             );
         }
 

@@ -173,16 +173,6 @@ class BMWCarData extends IPSModule
             $this->WriteAttributeString('pending_auth', json_encode($pending));
             $this->SetStatus(203);
 
-            // Log all fields BMW returned for diagnostics
-            $debugFields = [];
-            foreach ($pending as $k => $v) {
-                if ($k === 'code_verifier') {
-                    continue;
-                }
-                $debugFields[] = $k . '=' . (is_string($v) ? '"' . $v . '"' : json_encode($v));
-            }
-            $this->LogMessage('BMW CarData DEBUG device code response: ' . implode(', ', $debugFields), KL_MESSAGE);
-
             $uriComplete = $pending['verification_uri_complete'] ?? '';
             if ($uriComplete !== '') {
                 $this->LogMessage(
@@ -230,9 +220,6 @@ class BMWCarData extends IPSModule
                 return;
             }
 
-            if (isset($store['_debug_poll_response'])) {
-                $this->LogMessage('BMW CarData DEBUG token response: ' . $store['_debug_poll_response'], KL_MESSAGE);
-            }
             $this->saveStore($store);
             $this->WriteAttributeString('pending_auth', '');
             $this->SetStatus(102);

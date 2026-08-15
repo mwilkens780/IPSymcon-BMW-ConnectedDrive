@@ -4,7 +4,7 @@
     "name": "BMW CarData",
     "description": "BMW CarData official API integration for IP-Symcon. OAuth2 Device Code Flow, telematic data, charging history.",
     "version": "1.6",
-    "build": 10,
-    "date": 1786792206,
+    "build": 11,
+    "date": 1786798918,
     "url": "https://github.com/mwilkens780/IPSymcon-BMW-ConnectedDrive"
 }
