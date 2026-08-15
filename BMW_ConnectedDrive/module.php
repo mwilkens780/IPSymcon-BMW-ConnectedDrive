@@ -102,6 +102,14 @@ class BMWCarData extends IPSModule
         $pendingAuth = $this->readPendingAuth();
         $store       = $this->readStore();
 
+        // A pending device-code auth is only actionable while it hasn't expired.
+        // Without this check a long-dead code (e.g. from weeks ago) would keep being
+        // displayed as if it were still valid, since nothing else clears it.
+        if (!empty($pendingAuth) && (int) $pendingAuth['expires_at'] <= time()) {
+            $this->WriteAttributeString('pending_auth', '');
+            $pendingAuth = [];
+        }
+
         $statusElement = null;
 
         if (!empty($pendingAuth)) {
