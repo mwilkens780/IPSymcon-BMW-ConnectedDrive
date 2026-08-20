@@ -647,13 +647,18 @@ class BMWCarData extends IPSModule
         $fuelStr       = $fuelPct !== null ? number_format((float) $fuelPct, 0) . '%' : '–';
         $fuelPctClamp  = $fuelPct !== null ? max(0, min(100, (float) $fuelPct)) : 0;
         $batt12vStr    = $batt12v !== null ? number_format((float) $batt12v, 0) . '%' : '–';
-        $chgTimeStr    = ($chgTime !== null && (int) $chgTime > 0) ? $this->formatMinutes((int) $chgTime) : '';
+        // BMW keeps reporting a "time to full" estimate even while idle (not
+        // actually charging), which reads as contradictory next to a "Kein
+        // Ladevorgang" badge — only show it while charging is actually active.
+        $isCharging    = $chgCls === 'badge-green';
+        $chgTimeStr    = ($isCharging && $chgTime !== null && (int) $chgTime > 0) ? $this->formatMinutes((int) $chgTime) : '';
         $chgTimeDisp   = $chgTimeStr !== '' ? '' : 'display:none';
         $lastUpdateStr = $lastUpdate !== null ? date('d.m. H:i', strtotime((string) $lastUpdate)) : '–';
 
         $initJson = json_encode([
             'Locked'         => $locked,
             'ChargingStatus' => $chgStatus,
+            'ChargingTime'   => $chgTime,
         ]);
 
         return <<<HTML
@@ -805,11 +810,15 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
-function setChargingTime(v) {
+// BMW keeps reporting a "time to full" estimate even while idle — only show
+// the chip while charging is actually active (mirrors the PHP initial render).
+function updateChargeTimeVisibility() {
   var wrap = document.getElementById('chg_time_wrap');
   var el   = document.getElementById('stat_chgtime');
   if (!wrap || !el) return;
-  if (v == null || v <= 0) { wrap.style.display = 'none'; return; }
+  var isCharging = classifyCharging(state.ChargingStatus)[0] === 'badge-green';
+  var v = state.ChargingTime;
+  if (!isCharging || v == null || v <= 0) { wrap.style.display = 'none'; return; }
   wrap.style.display = '';
   var h = Math.floor(v / 60), m = v % 60;
   el.textContent = (h > 0 ? h + 'h ' : '') + m + 'min';
@@ -820,10 +829,10 @@ window.handleMessage = function(raw) {
   var key = data.key, val = data.value;
 
   if (key === 'Locked') { setLocked(val); state.Locked = val; }
-  else if (key === 'ChargingStatus') { setCharging(val); state.ChargingStatus = val; }
+  else if (key === 'ChargingStatus') { setCharging(val); state.ChargingStatus = val; updateChargeTimeVisibility(); }
   else if (key === 'ChargingLevel') { setBar('ev_bar_fill', 'ev_bar_text', val, '%'); }
   else if (key === 'FuelLevel') { setBar('fuel_bar_fill', 'fuel_bar_text', (val == null ? null : Math.round(val)), '%'); }
-  else if (key === 'ChargingTime') { setChargingTime(val); }
+  else if (key === 'ChargingTime') { state.ChargingTime = val; updateChargeTimeVisibility(); }
   else if (key === 'TotalRange') { setText('stat_range', val == null ? '–' : val + ' km'); }
   else if (key === 'EVRange') { setText('stat_evrange', val == null ? '–' : val + ' km'); }
   else if (key === 'Mileage') { setText('stat_mileage', val == null ? '–' : val + ' km'); }
