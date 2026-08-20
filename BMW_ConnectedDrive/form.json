@@ -13,9 +13,13 @@
         {
             "type": "NumberSpinner",
             "name": "update_interval",
-            "caption": "Aktualisierungsintervall (Sekunden, min. 300 wegen BMW Rate-Limit)",
-            "minimum": 300,
+            "caption": "Aktualisierungsintervall (Sekunden, min. 1800 empfohlen - BMW erlaubt nur ca. 50 Anfragen/Tag)",
+            "minimum": 1800,
             "suffix": "s"
+        },
+        {
+            "type": "Label",
+            "caption": "Bei kuerzeren Intervallen ist das Tageslimit oft schon nach 1-2 Stunden aufgebraucht, danach gibt es bis zum naechsten Reset (taeglich ca. 03:00 Uhr) keine neuen Daten mehr."
         },
         {
             "type": "ExpansionPanel",

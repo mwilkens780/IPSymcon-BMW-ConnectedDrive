@@ -14,7 +14,7 @@ class BMWCarData extends IPSModule
         parent::Create();
 
         $this->RegisterPropertyString('client_id',        '');
-        $this->RegisterPropertyInteger('update_interval', 300);
+        $this->RegisterPropertyInteger('update_interval', 1800);
 
         // Register one boolean property per selectable telematic key
         foreach ($this->getKeyMap() as $prop => $def) {
@@ -26,6 +26,7 @@ class BMWCarData extends IPSModule
         $this->RegisterAttributeString('container_keys',   '');
         $this->RegisterAttributeString('pending_auth',     '');
         $this->RegisterAttributeString('vin',              '');
+        $this->RegisterAttributeString('model_name',       '');
         $this->RegisterAttributeString('rate_limit_until', '0');
 
         $this->RegisterTimer('UpdateTimer', 0, 'BMWCD_FetchVehicleData($_IPS[\'TARGET\']);');
@@ -238,11 +239,12 @@ class BMWCarData extends IPSModule
 
     public function FetchVehicleData(): bool
     {
-        // Check if rate-limited
+        // Check if rate-limited. Not logging here — the transition into this
+        // state already logs a clear message below; re-logging on every poll
+        // while waiting (every 30 min, for up to ~22h) just floods the log
+        // with a message that never changes.
         $rateLimitUntil = (int) $this->ReadAttributeString('rate_limit_until');
         if ($rateLimitUntil > time()) {
-            $resumeAt = date('d.m.Y H:i', $rateLimitUntil);
-            $this->LogMessage("BMW CarData: API-Tageslimit erreicht, naechster Versuch ab $resumeAt.", KL_WARNING);
             return false;
         }
 
@@ -258,10 +260,21 @@ class BMWCarData extends IPSModule
                 $this->WriteAttributeString('container_keys', json_encode($selectedKeys));
             }
 
-            $basic     = $api->getBasicVehicleData($vin);
+            // basicData only ever supplies the model name, which never changes
+            // for a given VIN — fetch it once and cache it instead of spending
+            // half the (very tight) daily API quota on it every single poll.
+            $model = $this->ReadAttributeString('model_name');
+            if ($model === '') {
+                $basic = $api->getBasicVehicleData($vin);
+                $model = ($basic['modelName'] ?? '') ?: ($basic['model'] ?? '');
+                if ($model !== '') {
+                    $this->WriteAttributeString('model_name', $model);
+                }
+            }
+
             $telematic = $api->getTelematicData($vin, $containerId);
 
-            $this->updateVariables($vin, $basic, $telematic);
+            $this->updateVariables($vin, $model, $telematic);
             $this->WriteAttributeString('rate_limit_until', '0');
             $this->SetStatus(102);
             return true;
@@ -300,6 +313,7 @@ class BMWCarData extends IPSModule
         $this->WriteAttributeString('container_id',     '');
         $this->WriteAttributeString('container_keys',   '');
         $this->WriteAttributeString('vin',              '');
+        $this->WriteAttributeString('model_name',       '');
         $this->SetTimerInterval('UpdateTimer', 0);
         $this->SetStatus(202);
         $this->LogMessage('BMW CarData: Auth zurueckgesetzt. Bitte erneut anmelden.', KL_MESSAGE);
@@ -424,10 +438,8 @@ class BMWCarData extends IPSModule
         return $vin;
     }
 
-    private function updateVariables(string $vin, array $basic, array $telematic): void
+    private function updateVariables(string $vin, string $model, array $telematic): void
     {
-        // Always: model name from basicData
-        $model = ($basic['modelName'] ?? '') ?: ($basic['model'] ?? '');
         if ($model !== '') {
             $this->setVar($vin . '_Model', 'Modell', VARIABLETYPE_STRING, $model);
         }
