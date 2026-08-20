@@ -30,6 +30,9 @@ class BMWCarData extends IPSModule
         $this->RegisterAttributeString('rate_limit_until', '0');
 
         $this->RegisterTimer('UpdateTimer', 0, 'BMWCD_FetchVehicleData($_IPS[\'TARGET\']);');
+
+        // HTML-SDK dashboard tile (top-down car graphic + stat tiles)
+        $this->SetVisualizationType(1);
     }
 
     public function Destroy(): void
@@ -93,6 +96,13 @@ class BMWCarData extends IPSModule
         $interval = $this->ReadPropertyInteger('update_interval');
         $this->SetTimerInterval('UpdateTimer', $interval > 0 ? $interval * 1000 : 0);
         $this->SetStatus(102);
+    }
+
+    // ─── HTML-SDK: dashboard tile ──────────────────────────────────────────────
+
+    public function GetVisualizationTile(): string
+    {
+        return $this->buildDashboardHTML();
     }
 
     // ─── Dynamic configuration form ───────────────────────────────────────────
@@ -350,11 +360,11 @@ class BMWCarData extends IPSModule
             'key_ev_time'    => ['vehicle.drivetrain.electricEngine.charging.timeToFullyCharged',              'ChargingTime',   'Zeit bis Vollladung',  1, 'int',    true],
             'key_ev_plugged' => ['vehicle.powertrain.tractionBattery.charging.port.anyPosition.isPlugged',     'IsPlugged',      'Ladekabel',            0, 'bool',   true],
             // ── Individual doors & trunk ──────────────────────────────────────
-            'key_door_fl'    => ['vehicle.cabin.door.row1.driver.isOpen',                                      'DoorFL',         'Tuer vorne links',     0, 'bool',   false],
-            'key_door_fr'    => ['vehicle.cabin.door.row1.passenger.isOpen',                                   'DoorFR',         'Tuer vorne rechts',    0, 'bool',   false],
-            'key_door_rl'    => ['vehicle.cabin.door.row2.driver.isOpen',                                      'DoorRL',         'Tuer hinten links',    0, 'bool',   false],
-            'key_door_rr'    => ['vehicle.cabin.door.row2.passenger.isOpen',                                   'DoorRR',         'Tuer hinten rechts',   0, 'bool',   false],
-            'key_trunk'      => ['vehicle.body.trunk.door.isOpen',                                             'Trunk',          'Kofferraum',           0, 'bool',   false],
+            'key_door_fl'    => ['vehicle.cabin.door.row1.driver.isOpen',                                      'DoorFL',         'Tuer vorne links',     0, 'bool',   true],
+            'key_door_fr'    => ['vehicle.cabin.door.row1.passenger.isOpen',                                   'DoorFR',         'Tuer vorne rechts',    0, 'bool',   true],
+            'key_door_rl'    => ['vehicle.cabin.door.row2.driver.isOpen',                                      'DoorRL',         'Tuer hinten links',    0, 'bool',   true],
+            'key_door_rr'    => ['vehicle.cabin.door.row2.passenger.isOpen',                                   'DoorRR',         'Tuer hinten rechts',   0, 'bool',   true],
+            'key_trunk'      => ['vehicle.body.trunk.door.isOpen',                                             'Trunk',          'Kofferraum',           0, 'bool',   true],
             // ── Windows ───────────────────────────────────────────────────────
             'key_win_fl'     => ['vehicle.cabin.window.row1.driver.status',                                    'WindowFL',       'Fenster vorne links',  3, 'string', false],
             'key_win_fr'     => ['vehicle.cabin.window.row1.passenger.status',                                 'WindowFR',       'Fenster vorne rechts', 3, 'string', false],
@@ -492,6 +502,21 @@ class BMWCarData extends IPSModule
             }
         }
         $this->SetValue($ident, $value);
+        $this->pushValue($ident, $value);
+    }
+
+    /**
+     * Push a live value update to an already-open dashboard tile.
+     * Received client-side by window.handleMessage({key, value}) in
+     * buildDashboardHTML(). Strips the "<vin>_" prefix off the ident so the
+     * tile's JS can key off the same short names used when building the
+     * initial HTML (e.g. "Locked", "ChargingLevel").
+     */
+    private function pushValue(string $ident, $value): void
+    {
+        $vin = $this->ReadAttributeString('vin');
+        $key = ($vin !== '' && strpos($ident, $vin . '_') === 0) ? substr($ident, strlen($vin) + 1) : $ident;
+        $this->UpdateVisualizationValue(json_encode(['key' => $key, 'value' => $value]));
     }
 
     private function readStore(): array
@@ -517,5 +542,322 @@ class BMWCarData extends IPSModule
         }
         $data = json_decode($json, true);
         return is_array($data) ? $data : [];
+    }
+
+    // ─── HTML-SDK dashboard tile ────────────────────────────────────────────────
+
+    /** Reads a telematic variable's current value, or null if it doesn't exist (key disabled or never returned data by BMW). */
+    private function readVal(string $vin, string $identSuffix)
+    {
+        if ($vin === '') {
+            return null;
+        }
+        $id = @IPS_GetObjectIDByIdent($vin . '_' . $identSuffix, $this->InstanceID);
+        if ($id === false) {
+            return null;
+        }
+        return GetValue($id);
+    }
+
+    /**
+     * BMW doesn't expose an explicit "cable plugged in" flag that returns data
+     * for every vehicle (see project notes) — ChargingStatus is the reliable
+     * signal, so infer a coarse plugged/charging state from it instead.
+     * Returns [cssClass, germanLabel].
+     */
+    private function classifyChargingStatus(?string $status): array
+    {
+        if ($status === null || $status === '') {
+            return ['badge-off', 'Unbekannt'];
+        }
+        $s = strtoupper($status);
+        if (strpos($s, 'NOCHARGING') !== false || strpos($s, 'NOT_CHARGING') !== false || strpos($s, 'INVALID') !== false) {
+            return ['badge-off', 'Kein Ladevorgang'];
+        }
+        if (strpos($s, 'CHARGING') !== false) {
+            return ['badge-green', 'Laedt'];
+        }
+        if (strpos($s, 'FINISHED') !== false || strpos($s, 'TARGET') !== false || strpos($s, 'COMPLETE') !== false) {
+            return ['badge-on', 'Vollstaendig geladen'];
+        }
+        if (strpos($s, 'WAIT') !== false || strpos($s, 'PLUG') !== false) {
+            return ['badge-amber', 'Angeschlossen'];
+        }
+        return ['badge-off', $status];
+    }
+
+    private function doorClass($open): string
+    {
+        if ($open === null) {
+            return 'door-unknown';
+        }
+        return $open ? 'door-open' : 'door-closed';
+    }
+
+    private function formatMinutes(int $minutes): string
+    {
+        $h = intdiv($minutes, 60);
+        $m = $minutes % 60;
+        return $h > 0 ? "{$h}h {$m}min" : "{$m}min";
+    }
+
+    private function buildDashboardHTML(): string
+    {
+        $vin = $this->ReadAttributeString('vin');
+        if ($vin === '') {
+            return $this->buildPlaceholderHTML();
+        }
+
+        $model      = $this->readVal($vin, 'Model') ?: $this->ReadAttributeString('model_name');
+        $locked     = $this->readVal($vin, 'Locked');
+        $mileage    = $this->readVal($vin, 'Mileage');
+        $totalRange = $this->readVal($vin, 'TotalRange');
+        $evRange    = $this->readVal($vin, 'EVRange');
+        $evLevel    = $this->readVal($vin, 'ChargingLevel');
+        $chgStatus  = $this->readVal($vin, 'ChargingStatus');
+        $chgTime    = $this->readVal($vin, 'ChargingTime');
+        $fuelPct    = $this->readVal($vin, 'FuelLevel');
+        $batt12v    = $this->readVal($vin, 'Battery12V');
+        $lastUpdate = $this->readVal($vin, 'LastUpdate');
+
+        $doorFL = $this->readVal($vin, 'DoorFL');
+        $doorFR = $this->readVal($vin, 'DoorFR');
+        $doorRL = $this->readVal($vin, 'DoorRL');
+        $doorRR = $this->readVal($vin, 'DoorRR');
+        $trunk  = $this->readVal($vin, 'Trunk');
+
+        [$chgCls, $chgLabel] = $this->classifyChargingStatus($chgStatus);
+
+        $lockCls  = $locked === null ? 'badge-off' : ($locked ? 'badge-on' : 'badge-warn');
+        $lockText = $locked === null ? '– Verriegelt' : ($locked ? '🔒 Verriegelt' : '🔓 Entriegelt');
+
+        $modelEsc = htmlspecialchars(($model !== null && $model !== '') ? (string) $model : 'BMW', ENT_QUOTES);
+
+        $doorFLCls = $this->doorClass($doorFL);
+        $doorFRCls = $this->doorClass($doorFR);
+        $doorRLCls = $this->doorClass($doorRL);
+        $doorRRCls = $this->doorClass($doorRR);
+        $trunkCls  = $this->doorClass($trunk);
+
+        $mileageStr    = $mileage !== null ? number_format((float) $mileage, 0, ',', '.') . ' km' : '–';
+        $totalRangeStr = $totalRange !== null ? "{$totalRange} km" : '–';
+        $evRangeStr    = $evRange !== null ? "{$evRange} km" : '–';
+        $evLevelStr    = $evLevel !== null ? "{$evLevel}%" : '–';
+        $evLevelPct    = $evLevel !== null ? max(0, min(100, (int) $evLevel)) : 0;
+        $fuelStr       = $fuelPct !== null ? number_format((float) $fuelPct, 0) . '%' : '–';
+        $fuelPctClamp  = $fuelPct !== null ? max(0, min(100, (float) $fuelPct)) : 0;
+        $batt12vStr    = $batt12v !== null ? number_format((float) $batt12v, 0) . '%' : '–';
+        $chgTimeStr    = ($chgTime !== null && (int) $chgTime > 0) ? $this->formatMinutes((int) $chgTime) : '';
+        $chgTimeDisp   = $chgTimeStr !== '' ? '' : 'display:none';
+        $lastUpdateStr = $lastUpdate !== null ? date('d.m. H:i', strtotime((string) $lastUpdate)) : '–';
+
+        $initJson = json_encode([
+            'Locked'         => $locked,
+            'ChargingStatus' => $chgStatus,
+        ]);
+
+        return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html{height:100%}
+*{box-sizing:border-box;margin:0;padding:0}
+body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;background:#0d1b2a;color:#d0e8ff;display:flex;flex-direction:column;padding:10px;gap:8px}
+.header{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:14px;font-weight:600;border-bottom:1px solid #1e3a5f;padding-bottom:6px;flex:none}
+.badge{padding:3px 8px;border-radius:12px;font-size:12px;border:1px solid transparent;white-space:nowrap}
+.badge-on{background:#1e4a6e;border-color:#3a8abf;color:#7ec8f0}
+.badge-off{background:#1a2535;border-color:#2a3a50;color:#4a6a8a}
+.badge-warn{background:#4a2010;border-color:#8a4020;color:#f08060}
+.badge-green{background:#124a1e;border-color:#2f8a44;color:#7ee89a}
+.badge-amber{background:#4a3510;border-color:#8a6a20;color:#f0c060}
+.main{display:flex;gap:14px;flex:1;min-height:0}
+.car-col{flex:0 0 38%;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0}
+.car-col svg{width:100%;height:100%;max-height:100%}
+.body-outline{fill:#16233b;stroke:#2a4a7a;stroke-width:2}
+.cabin{fill:#0a1526;opacity:.8}
+.hl{fill:#ffedc0;opacity:.5}
+.tl{fill:#f08060;opacity:.5}
+.door{stroke-width:1.5;transition:fill .3s,stroke .3s}
+.door-open{fill:#4a2010;stroke:#f08060}
+.door-closed{fill:#16233b;stroke:#2a4a7a}
+.door-unknown{fill:#0d1b2a;stroke:#2a3a50;stroke-dasharray:3 3}
+.charge-port{stroke-width:1.5;transition:fill .3s,stroke .3s}
+.charge-port.badge-green{fill:#2f8a44;stroke:#7ee89a}
+.charge-port.badge-amber{fill:#8a6a20;stroke:#f0c060}
+.charge-port.badge-on{fill:#3a8abf;stroke:#7ec8f0}
+.charge-port.badge-off{fill:#1a2535;stroke:#2a3a50}
+.stats-col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0;justify-content:center}
+.bar-tile{display:flex;flex-direction:column;gap:3px}
+.bar-tile-head{display:flex;justify-content:space-between;font-size:12px;color:#8aa8c8}
+.bar-track{height:10px;background:#1a2535;border-radius:5px;overflow:hidden}
+.bar-fill{height:100%;border-radius:5px;transition:width .4s}
+.bar-fill.ev{background:linear-gradient(90deg,#2f8a44,#7ee89a)}
+.bar-fill.fuel{background:linear-gradient(90deg,#8a6a20,#f0c060)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-top:4px}
+.stat{display:flex;flex-direction:column;gap:1px}
+.stat-label{font-size:10px;color:#4a6a8a;text-transform:uppercase;letter-spacing:.03em}
+.stat-value{font-size:15px;font-weight:700;color:#d0e8ff}
+.footer-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none;font-size:11px;border-top:1px solid #1e3a5f;padding-top:6px}
+.chg-time{color:#8aa8c8}
+.last-update{margin-left:auto;font-size:10px;color:#3a5a7a}
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="model">🚗 {$modelEsc}</span>
+  <span id="lock_badge" class="badge {$lockCls}">{$lockText}</span>
+</div>
+<div class="main">
+  <div class="car-col">
+    <svg viewBox="0 0 220 460" preserveAspectRatio="xMidYMid meet">
+      <rect class="body-outline" x="25" y="10" width="170" height="440" rx="55"/>
+      <ellipse class="hl" cx="55" cy="28" rx="10" ry="6"/>
+      <ellipse class="hl" cx="165" cy="28" rx="10" ry="6"/>
+      <rect class="cabin" x="60" y="100" width="100" height="180" rx="18"/>
+      <rect id="door_fl" class="door {$doorFLCls}" x="25" y="100" width="35" height="85" rx="8"><title>Tuer vorne links</title></rect>
+      <rect id="door_fr" class="door {$doorFRCls}" x="160" y="100" width="35" height="85" rx="8"><title>Tuer vorne rechts</title></rect>
+      <rect id="door_rl" class="door {$doorRLCls}" x="25" y="195" width="35" height="85" rx="8"><title>Tuer hinten links</title></rect>
+      <rect id="door_rr" class="door {$doorRRCls}" x="160" y="195" width="35" height="85" rx="8"><title>Tuer hinten rechts</title></rect>
+      <rect id="door_trunk" class="door {$trunkCls}" x="45" y="390" width="130" height="45" rx="10"><title>Kofferraum</title></rect>
+      <rect class="tl" x="35" y="435" width="18" height="8" rx="2"/>
+      <rect class="tl" x="167" y="435" width="18" height="8" rx="2"/>
+      <circle id="charge_port" class="charge-port {$chgCls}" cx="21" cy="255" r="9"><title>Ladeanschluss (Position ungefaehr)</title></circle>
+    </svg>
+  </div>
+  <div class="stats-col">
+    <div class="bar-tile">
+      <div class="bar-tile-head"><span>🔋 Ladestand</span><span id="ev_bar_text">{$evLevelStr}</span></div>
+      <div class="bar-track"><div id="ev_bar_fill" class="bar-fill ev" style="width:{$evLevelPct}%"></div></div>
+    </div>
+    <div class="bar-tile">
+      <div class="bar-tile-head"><span>⛽ Kraftstoff</span><span id="fuel_bar_text">{$fuelStr}</span></div>
+      <div class="bar-track"><div id="fuel_bar_fill" class="bar-fill fuel" style="width:{$fuelPctClamp}%"></div></div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Gesamtreichweite</span><span id="stat_range" class="stat-value">{$totalRangeStr}</span></div>
+      <div class="stat"><span class="stat-label">EV-Reichweite</span><span id="stat_evrange" class="stat-value">{$evRangeStr}</span></div>
+      <div class="stat"><span class="stat-label">Kilometerstand</span><span id="stat_mileage" class="stat-value">{$mileageStr}</span></div>
+      <div class="stat"><span class="stat-label">12V-Batterie</span><span id="stat_batt12v" class="stat-value">{$batt12vStr}</span></div>
+    </div>
+  </div>
+</div>
+<div class="footer-row">
+  <span id="charge_badge" class="badge {$chgCls}">⚡ {$chgLabel}</span>
+  <span id="chg_time_wrap" class="chg-time" style="{$chgTimeDisp}"><span id="stat_chgtime">{$chgTimeStr}</span> bis voll</span>
+  <span id="last_update" class="last-update">{$lastUpdateStr}</span>
+</div>
+<script>
+// WebFront injects its own body{margin-top:...;margin-bottom:...} (reserved
+// space for the tile's title/expand-icon overlay). Measure it and size body
+// to exactly fill what's left instead of guessing a fixed pixel value.
+(function() {
+  var cs = getComputedStyle(document.body);
+  var vExtra = (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+  document.body.style.height = 'calc(100% - ' + vExtra + 'px)';
+})();
+
+var state = {$initJson};
+
+function setDoor(id, open) {
+  var el = document.getElementById('door_' + id);
+  if (!el) return;
+  el.setAttribute('class', 'door ' + (open === true ? 'door-open' : (open === false ? 'door-closed' : 'door-unknown')));
+}
+
+function classifyCharging(status) {
+  if (!status) return ['badge-off', 'Unbekannt'];
+  var s = status.toUpperCase();
+  if (s.indexOf('NOCHARGING') >= 0 || s.indexOf('NOT_CHARGING') >= 0 || s.indexOf('INVALID') >= 0) return ['badge-off', 'Kein Ladevorgang'];
+  if (s.indexOf('CHARGING') >= 0) return ['badge-green', 'Laedt'];
+  if (s.indexOf('FINISHED') >= 0 || s.indexOf('TARGET') >= 0 || s.indexOf('COMPLETE') >= 0) return ['badge-on', 'Vollstaendig geladen'];
+  if (s.indexOf('WAIT') >= 0 || s.indexOf('PLUG') >= 0) return ['badge-amber', 'Angeschlossen'];
+  return ['badge-off', status];
+}
+
+function setCharging(status) {
+  var cls = classifyCharging(status);
+  var badge = document.getElementById('charge_badge');
+  if (badge) { badge.className = 'badge ' + cls[0]; badge.textContent = '⚡ ' + cls[1]; }
+  var port = document.getElementById('charge_port');
+  if (port) { port.setAttribute('class', 'charge-port ' + cls[0]); }
+}
+
+function setLocked(v) {
+  var el = document.getElementById('lock_badge');
+  if (!el) return;
+  if (v === true) { el.className = 'badge badge-on'; el.textContent = '🔒 Verriegelt'; }
+  else if (v === false) { el.className = 'badge badge-warn'; el.textContent = '🔓 Entriegelt'; }
+  else { el.className = 'badge badge-off'; el.textContent = '– Verriegelt'; }
+}
+
+function setBar(fillId, textId, v, suffix) {
+  var fill = document.getElementById(fillId);
+  var text = document.getElementById(textId);
+  var pct = (v == null) ? 0 : Math.max(0, Math.min(100, v));
+  if (fill) fill.style.width = pct + '%';
+  if (text) text.textContent = (v == null ? '–' : v + (suffix || ''));
+}
+
+function setText(id, text) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function setChargingTime(v) {
+  var wrap = document.getElementById('chg_time_wrap');
+  var el   = document.getElementById('stat_chgtime');
+  if (!wrap || !el) return;
+  if (v == null || v <= 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  var h = Math.floor(v / 60), m = v % 60;
+  el.textContent = (h > 0 ? h + 'h ' : '') + m + 'min';
+}
+
+window.handleMessage = function(raw) {
+  var data = JSON.parse(raw);
+  var key = data.key, val = data.value;
+
+  if (key === 'Locked') { setLocked(val); state.Locked = val; }
+  else if (key === 'ChargingStatus') { setCharging(val); state.ChargingStatus = val; }
+  else if (key === 'ChargingLevel') { setBar('ev_bar_fill', 'ev_bar_text', val, '%'); }
+  else if (key === 'FuelLevel') { setBar('fuel_bar_fill', 'fuel_bar_text', (val == null ? null : Math.round(val)), '%'); }
+  else if (key === 'ChargingTime') { setChargingTime(val); }
+  else if (key === 'TotalRange') { setText('stat_range', val == null ? '–' : val + ' km'); }
+  else if (key === 'EVRange') { setText('stat_evrange', val == null ? '–' : val + ' km'); }
+  else if (key === 'Mileage') { setText('stat_mileage', val == null ? '–' : val + ' km'); }
+  else if (key === 'Battery12V') { setText('stat_batt12v', val == null ? '–' : Math.round(val) + '%'); }
+  else if (key === 'LastUpdate') { setText('last_update', val); }
+  else if (key === 'DoorFL') { setDoor('fl', val); }
+  else if (key === 'DoorFR') { setDoor('fr', val); }
+  else if (key === 'DoorRL') { setDoor('rl', val); }
+  else if (key === 'DoorRR') { setDoor('rr', val); }
+  else if (key === 'Trunk')  { setDoor('trunk', val); }
+};
+</script>
+</body>
+</html>
+HTML;
+    }
+
+    private function buildPlaceholderHTML(): string
+    {
+        return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html{height:100%}
+*{box-sizing:border-box;margin:0;padding:0}
+body{overflow:hidden;display:flex;align-items:center;justify-content:center;background:#0d1b2a;color:#8aa8c8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;text-align:center;padding:20px}
+</style>
+</head>
+<body>
+<div>🚗 Noch nicht angemeldet.<br>Bitte in den Instanz-Einstellungen anmelden.</div>
+</body>
+</html>
+HTML;
     }
 }
