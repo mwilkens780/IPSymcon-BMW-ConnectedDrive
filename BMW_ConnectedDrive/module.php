@@ -486,23 +486,37 @@ class BMWCarData extends IPSModule
 
     private function setVar(string $ident, string $name, int $type, $value): void
     {
-        if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID) === false) {
-            switch ($type) {
-                case VARIABLETYPE_BOOLEAN:
-                    $this->RegisterVariableBoolean($ident, $name);
-                    break;
-                case VARIABLETYPE_INTEGER:
-                    $this->RegisterVariableInteger($ident, $name);
-                    break;
-                case VARIABLETYPE_FLOAT:
-                    $this->RegisterVariableFloat($ident, $name);
-                    break;
-                default:
-                    $this->RegisterVariableString($ident, $name);
-            }
+        $varId = @IPS_GetObjectIDByIdent($ident, $this->InstanceID);
+        if ($varId === false) {
+            $this->createVariable($ident, $name, $type);
+        } elseif ((int) IPS_GetVariable($varId)['VariableType'] !== $type) {
+            // A variable created by an older module version can end up with
+            // the wrong type (found live 01.09.2026: "ChargingTime" existed
+            // as Boolean, showing "On"/"Off" instead of minutes, from a
+            // schema that predates the current key map). IPS has no
+            // in-place type change, only delete + recreate.
+            IPS_DeleteVariable($varId);
+            $this->createVariable($ident, $name, $type);
         }
         $this->SetValue($ident, $value);
         $this->pushValue($ident, $value);
+    }
+
+    private function createVariable(string $ident, string $name, int $type): void
+    {
+        switch ($type) {
+            case VARIABLETYPE_BOOLEAN:
+                $this->RegisterVariableBoolean($ident, $name);
+                break;
+            case VARIABLETYPE_INTEGER:
+                $this->RegisterVariableInteger($ident, $name);
+                break;
+            case VARIABLETYPE_FLOAT:
+                $this->RegisterVariableFloat($ident, $name);
+                break;
+            default:
+                $this->RegisterVariableString($ident, $name);
+        }
     }
 
     /**
@@ -571,19 +585,31 @@ class BMWCarData extends IPSModule
             return ['badge-off', 'Unbekannt'];
         }
         $s = strtoupper($status);
+        // Terminal/finished states must be checked before the generic
+        // "CHARGING" substring match below -- BMW's real-world value
+        // "CHARGINGENDED" (confirmed live 01.09.2026) contains "CHARGING"
+        // and would otherwise be misread as still actively charging.
+        if (strpos($s, 'ENDED') !== false || strpos($s, 'FINISHED') !== false || strpos($s, 'TARGET') !== false || strpos($s, 'COMPLETE') !== false) {
+            return ['badge-on', 'Vollstaendig geladen'];
+        }
         if (strpos($s, 'NOCHARGING') !== false || strpos($s, 'NOT_CHARGING') !== false || strpos($s, 'INVALID') !== false) {
             return ['badge-off', 'Kein Ladevorgang'];
         }
         if (strpos($s, 'CHARGING') !== false) {
             return ['badge-green', 'Laedt'];
         }
-        if (strpos($s, 'FINISHED') !== false || strpos($s, 'TARGET') !== false || strpos($s, 'COMPLETE') !== false) {
-            return ['badge-on', 'Vollstaendig geladen'];
-        }
         if (strpos($s, 'WAIT') !== false || strpos($s, 'PLUG') !== false) {
             return ['badge-amber', 'Angeschlossen'];
         }
         return ['badge-off', $status];
+    }
+
+    private function windowClass(?string $status): string
+    {
+        if ($status === null || $status === '') {
+            return 'door-unknown';
+        }
+        return strtoupper($status) === 'CLOSED' ? 'door-closed' : 'door-open';
     }
 
     private function doorClass($open): string
@@ -626,6 +652,11 @@ class BMWCarData extends IPSModule
         $doorRR = $this->readVal($vin, 'DoorRR');
         $trunk  = $this->readVal($vin, 'Trunk');
 
+        $winFL = $this->readVal($vin, 'WindowFL');
+        $winFR = $this->readVal($vin, 'WindowFR');
+        $winRL = $this->readVal($vin, 'WindowRL');
+        $winRR = $this->readVal($vin, 'WindowRR');
+
         [$chgCls, $chgLabel] = $this->classifyChargingStatus($chgStatus);
 
         $lockCls  = $locked === null ? 'badge-off' : ($locked ? 'badge-on' : 'badge-warn');
@@ -639,6 +670,11 @@ class BMWCarData extends IPSModule
         $doorRRCls = $this->doorClass($doorRR);
         $trunkCls  = $this->doorClass($trunk);
 
+        $winFLCls = $this->windowClass($winFL);
+        $winFRCls = $this->windowClass($winFR);
+        $winRLCls = $this->windowClass($winRL);
+        $winRRCls = $this->windowClass($winRR);
+
         $mileageStr    = $mileage !== null ? number_format((float) $mileage, 0, ',', '.') . ' km' : '–';
         $totalRangeStr = $totalRange !== null ? "{$totalRange} km" : '–';
         $evRangeStr    = $evRange !== null ? "{$evRange} km" : '–';
@@ -646,7 +682,13 @@ class BMWCarData extends IPSModule
         $evLevelPct    = $evLevel !== null ? max(0, min(100, (int) $evLevel)) : 0;
         $fuelStr       = $fuelPct !== null ? number_format((float) $fuelPct, 0) . '%' : '–';
         $fuelPctClamp  = $fuelPct !== null ? max(0, min(100, (float) $fuelPct)) : 0;
-        $batt12vStr    = $batt12v !== null ? number_format((float) $batt12v, 0) . '%' : '–';
+        // Battery12V never returns data for this vehicle (confirmed
+        // 20.08.2026/01.09.2026 -- BMW simply doesn't expose it for every
+        // model), so the variable never even gets created -- omit the tile
+        // entirely instead of permanently showing a dead "–" placeholder.
+        $batt12vTile = $batt12v !== null
+            ? '<div class="stat"><span class="stat-label">12V-Batterie</span><span id="stat_batt12v" class="stat-value">' . number_format((float) $batt12v, 0) . '%</span></div>'
+            : '';
         // BMW keeps reporting a "time to full" estimate even while idle (not
         // actually charging), which reads as contradictory next to a "Kein
         // Ladevorgang" badge — only show it while charging is actually active.
@@ -726,6 +768,10 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
       <rect id="door_rl" class="door {$doorRLCls}" x="25" y="195" width="35" height="85" rx="8"><title>Tuer hinten links</title></rect>
       <rect id="door_rr" class="door {$doorRRCls}" x="160" y="195" width="35" height="85" rx="8"><title>Tuer hinten rechts</title></rect>
       <rect id="door_trunk" class="door {$trunkCls}" x="45" y="390" width="130" height="45" rx="10"><title>Kofferraum</title></rect>
+      <rect id="window_fl" class="door {$winFLCls}" x="25" y="100" width="35" height="16" rx="4"><title>Fenster vorne links</title></rect>
+      <rect id="window_fr" class="door {$winFRCls}" x="160" y="100" width="35" height="16" rx="4"><title>Fenster vorne rechts</title></rect>
+      <rect id="window_rl" class="door {$winRLCls}" x="25" y="195" width="35" height="16" rx="4"><title>Fenster hinten links</title></rect>
+      <rect id="window_rr" class="door {$winRRCls}" x="160" y="195" width="35" height="16" rx="4"><title>Fenster hinten rechts</title></rect>
       <rect class="tl" x="35" y="435" width="18" height="8" rx="2"/>
       <rect class="tl" x="167" y="435" width="18" height="8" rx="2"/>
       <circle id="charge_port" class="charge-port {$chgCls}" cx="21" cy="255" r="9"><title>Ladeanschluss (Position ungefaehr)</title></circle>
@@ -744,7 +790,7 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
       <div class="stat"><span class="stat-label">Gesamtreichweite</span><span id="stat_range" class="stat-value">{$totalRangeStr}</span></div>
       <div class="stat"><span class="stat-label">EV-Reichweite</span><span id="stat_evrange" class="stat-value">{$evRangeStr}</span></div>
       <div class="stat"><span class="stat-label">Kilometerstand</span><span id="stat_mileage" class="stat-value">{$mileageStr}</span></div>
-      <div class="stat"><span class="stat-label">12V-Batterie</span><span id="stat_batt12v" class="stat-value">{$batt12vStr}</span></div>
+      {$batt12vTile}
     </div>
   </div>
 </div>
@@ -774,11 +820,20 @@ function setDoor(id, open) {
 function classifyCharging(status) {
   if (!status) return ['badge-off', 'Unbekannt'];
   var s = status.toUpperCase();
+  // Same order as classifyChargingStatus() in PHP -- terminal states before
+  // the generic "CHARGING" match, since e.g. "CHARGINGENDED" contains both.
+  if (s.indexOf('ENDED') >= 0 || s.indexOf('FINISHED') >= 0 || s.indexOf('TARGET') >= 0 || s.indexOf('COMPLETE') >= 0) return ['badge-on', 'Vollstaendig geladen'];
   if (s.indexOf('NOCHARGING') >= 0 || s.indexOf('NOT_CHARGING') >= 0 || s.indexOf('INVALID') >= 0) return ['badge-off', 'Kein Ladevorgang'];
   if (s.indexOf('CHARGING') >= 0) return ['badge-green', 'Laedt'];
-  if (s.indexOf('FINISHED') >= 0 || s.indexOf('TARGET') >= 0 || s.indexOf('COMPLETE') >= 0) return ['badge-on', 'Vollstaendig geladen'];
   if (s.indexOf('WAIT') >= 0 || s.indexOf('PLUG') >= 0) return ['badge-amber', 'Angeschlossen'];
   return ['badge-off', status];
+}
+
+function setWindow(id, status) {
+  var el = document.getElementById('window_' + id);
+  if (!el) return;
+  var cls = (status == null || status === '') ? 'door-unknown' : (String(status).toUpperCase() === 'CLOSED' ? 'door-closed' : 'door-open');
+  el.setAttribute('class', 'door ' + cls);
 }
 
 function setCharging(status) {
@@ -843,6 +898,10 @@ window.handleMessage = function(raw) {
   else if (key === 'DoorRL') { setDoor('rl', val); }
   else if (key === 'DoorRR') { setDoor('rr', val); }
   else if (key === 'Trunk')  { setDoor('trunk', val); }
+  else if (key === 'WindowFL') { setWindow('fl', val); }
+  else if (key === 'WindowFR') { setWindow('fr', val); }
+  else if (key === 'WindowRL') { setWindow('rl', val); }
+  else if (key === 'WindowRR') { setWindow('rr', val); }
 };
 </script>
 </body>
