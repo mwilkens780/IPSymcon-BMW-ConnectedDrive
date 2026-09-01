@@ -346,7 +346,7 @@ class BMWCarData extends IPSModule
             'key_door_all'   => ['vehicle.cabin.door.status',                                                  'DoorStatus',     'Tuer-Gesamtstatus',    3, 'string', true],
             'key_lat'        => ['vehicle.cabin.infotainment.navigation.currentLocation.latitude',             'Latitude',       'GPS Breitengrad',      2, 'float',  true],
             'key_lon'        => ['vehicle.cabin.infotainment.navigation.currentLocation.longitude',            'Longitude',      'GPS Laengengrad',      2, 'float',  true],
-            'key_heading'    => ['vehicle.cabin.infotainment.navigation.currentLocation.heading',              'Heading',        'Fahrtrichtung (Grad)', 1, 'int',    false],
+            'key_heading'    => ['vehicle.cabin.infotainment.navigation.currentLocation.heading',              'Heading',        'Fahrtrichtung (Grad)', 1, 'int',    true],
             'key_batt12v'    => ['vehicle.electricalSystem.battery.stateOfCharge',                            'Battery12V',     '12V-Batterie (%)',     2, 'float',  true],
             'key_nav_range'  => ['vehicle.cabin.infotainment.navigation.remainingRange',                       'NavRange',       'Reichweite (Navi)',    1, 'int',    false],
             // ── Combustion / Hybrid ───────────────────────────────────────────
@@ -627,6 +627,37 @@ class BMWCarData extends IPSModule
         return $h > 0 ? "{$h}h {$m}min" : "{$m}min";
     }
 
+    /**
+     * OpenStreetMap embed (no API key needed) centered on the vehicle's last
+     * known position. The heading arrow is a plain rotated element overlaid
+     * on top of the iframe -- the iframe itself can't be scripted cross-origin.
+     */
+    private function renderMapBlock($lat, $lon, $heading): string
+    {
+        if ($lat === null || $lon === null) {
+            return '';
+        }
+
+        $latF = (float) $lat;
+        $lonF = (float) $lon;
+        $d    = 0.004;
+        // sprintf with '.' forced -- (string) cast would use the server locale's
+        // decimal separator (e.g. "53,72" in de_DE), breaking the bbox param.
+        $bbox = sprintf('%.6F,%.6F,%.6F,%.6F', $lonF - $d, $latF - $d, $lonF + $d, $latF + $d);
+        $marker = sprintf('%.6F,%.6F', $latF, $lonF);
+        $src = 'https://www.openstreetmap.org/export/embed.html?bbox=' . urlencode($bbox) . '&layer=mapnik&marker=' . urlencode($marker);
+
+        $headingDeg  = $heading !== null ? (int) $heading : 0;
+        $headingDisp = $heading !== null ? '' : 'display:none';
+
+        return <<<HTML
+<div class="map-block" id="map_wrap">
+  <iframe id="map_frame" src="{$src}" loading="lazy" title="Fahrzeugposition"></iframe>
+  <div id="heading_arrow" class="heading-arrow" style="{$headingDisp};transform:rotate({$headingDeg}deg)">▲</div>
+</div>
+HTML;
+    }
+
     private function buildDashboardHTML(): string
     {
         $vin = $this->ReadAttributeString('vin');
@@ -656,6 +687,10 @@ class BMWCarData extends IPSModule
         $winFR = $this->readVal($vin, 'WindowFR');
         $winRL = $this->readVal($vin, 'WindowRL');
         $winRR = $this->readVal($vin, 'WindowRR');
+
+        $lat     = $this->readVal($vin, 'Latitude');
+        $lon     = $this->readVal($vin, 'Longitude');
+        $heading = $this->readVal($vin, 'Heading');
 
         [$chgCls, $chgLabel] = $this->classifyChargingStatus($chgStatus);
 
@@ -697,10 +732,14 @@ class BMWCarData extends IPSModule
         $chgTimeDisp   = $chgTimeStr !== '' ? '' : 'display:none';
         $lastUpdateStr = $lastUpdate !== null ? date('d.m. H:i', strtotime((string) $lastUpdate)) : '–';
 
+        $mapBlock = $this->renderMapBlock($lat, $lon, $heading);
+
         $initJson = json_encode([
             'Locked'         => $locked,
             'ChargingStatus' => $chgStatus,
             'ChargingTime'   => $chgTime,
+            'Latitude'       => $lat,
+            'Longitude'      => $lon,
         ]);
 
         return <<<HTML
@@ -749,6 +788,9 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .footer-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none;font-size:11px;border-top:1px solid #1e3a5f;padding-top:6px}
 .chg-time{color:#8aa8c8}
 .last-update{margin-left:auto;font-size:10px;color:#3a5a7a}
+.map-block{position:relative;height:110px;border-radius:8px;overflow:hidden;flex:none;background:#131f33}
+.map-block iframe{width:100%;height:100%;border:0}
+.heading-arrow{position:absolute;bottom:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(13,27,42,.8);border:1px solid #2a4a7a;color:#7ec8f0;display:flex;align-items:center;justify-content:center;font-size:13px;transform-origin:50% 50%;pointer-events:none}
 </style>
 </head>
 <body>
@@ -794,6 +836,7 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
     </div>
   </div>
 </div>
+{$mapBlock}
 <div class="footer-row">
   <span id="charge_badge" class="badge {$chgCls}">⚡ {$chgLabel}</span>
   <span id="chg_time_wrap" class="chg-time" style="{$chgTimeDisp}"><span id="stat_chgtime">{$chgTimeStr}</span> bis voll</span>
@@ -834,6 +877,25 @@ function setWindow(id, status) {
   if (!el) return;
   var cls = (status == null || status === '') ? 'door-unknown' : (String(status).toUpperCase() === 'CLOSED' ? 'door-closed' : 'door-open');
   el.setAttribute('class', 'door ' + cls);
+}
+
+// The iframe is a different origin (openstreetmap.org), so it can only be
+// repositioned by reloading its src with a new bbox/marker -- there is no
+// way to pan it from here. Fine at a 30min poll interval.
+function updateMap(lat, lon) {
+  var frame = document.getElementById('map_frame');
+  if (!frame || lat == null || lon == null) return;
+  var d = 0.004;
+  var bbox = (lon - d) + ',' + (lat - d) + ',' + (lon + d) + ',' + (lat + d);
+  frame.src = 'https://www.openstreetmap.org/export/embed.html?bbox=' + encodeURIComponent(bbox) + '&layer=mapnik&marker=' + encodeURIComponent(lat + ',' + lon);
+}
+
+function updateHeadingArrow(deg) {
+  var el = document.getElementById('heading_arrow');
+  if (!el) return;
+  if (deg == null) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.style.transform = 'rotate(' + deg + 'deg)';
 }
 
 function setCharging(status) {
@@ -902,6 +964,9 @@ window.handleMessage = function(raw) {
   else if (key === 'WindowFR') { setWindow('fr', val); }
   else if (key === 'WindowRL') { setWindow('rl', val); }
   else if (key === 'WindowRR') { setWindow('rr', val); }
+  else if (key === 'Latitude')  { if (val !== state.Latitude)  { state.Latitude = val;  updateMap(state.Latitude, state.Longitude); } }
+  else if (key === 'Longitude') { if (val !== state.Longitude) { state.Longitude = val; updateMap(state.Latitude, state.Longitude); } }
+  else if (key === 'Heading')  { updateHeadingArrow(val); }
 };
 </script>
 </body>
